@@ -18,23 +18,15 @@ def truncate_2_decimals(n):
 
 
 def calculate_limit_up(price):
-    """
-    根據台灣證券交易所的升降單位(Tick Size)與單日10%限制，精確計算漲停價
-    """
+    """根據台灣證券交易所的升降單位(Tick Size)與單日10%限制，精確計算漲停價"""
     raw_limit_up = price * 1.1
 
-    if raw_limit_up < 10:
-        tick = 0.01
-    elif raw_limit_up < 50:
-        tick = 0.05
-    elif raw_limit_up < 100:
-        tick = 0.1
-    elif raw_limit_up < 500:
-        tick = 0.5
-    elif raw_limit_up < 1000:
-        tick = 1.0
-    else:
-        tick = 5.0
+    if raw_limit_up < 10: tick = 0.01
+    elif raw_limit_up < 50: tick = 0.05
+    elif raw_limit_up < 100: tick = 0.1
+    elif raw_limit_up < 500: tick = 0.5
+    elif raw_limit_up < 1000: tick = 1.0
+    else: tick = 5.0
 
     eps = 1e-9
     limit_up_price = math.floor((raw_limit_up + eps) / tick) * tick
@@ -42,23 +34,15 @@ def calculate_limit_up(price):
 
 
 def calculate_limit_down(price):
-    """
-    根據台灣證券交易所的升降單位(Tick Size)與單日10%限制，精確計算跌停價（需無條件進位）
-    """
+    """根據台灣證券交易所的升降單位(Tick Size)與單日10%限制，精確計算跌停價（需無條件進位）"""
     raw_limit_down = price * 0.9
 
-    if raw_limit_down <= 10:
-        tick = 0.01
-    elif raw_limit_down <= 50:
-        tick = 0.05
-    elif raw_limit_down <= 100:
-        tick = 0.1
-    elif raw_limit_down <= 500:
-        tick = 0.5
-    elif raw_limit_down <= 1000:
-        tick = 1.0
-    else:
-        tick = 5.0
+    if raw_limit_down <= 10: tick = 0.01
+    elif raw_limit_down <= 50: tick = 0.05
+    elif raw_limit_down <= 100: tick = 0.1
+    elif raw_limit_down <= 500: tick = 0.5
+    elif raw_limit_down <= 1000: tick = 1.0
+    else: tick = 5.0
 
     eps = 1e-9
     limit_down_price = math.ceil((raw_limit_down - eps) / tick) * tick
@@ -66,10 +50,8 @@ def calculate_limit_down(price):
 
 
 def get_next_business_days(start_date_str, count=5):
-    """
-    結合 115 年證交所官方行事曆，自動跳過例假日與國定休假日
-    """
-    twse_holidays_2026 = {
+    """結合證交所官方行事曆，自動跳過例假日與國定休假日"""
+    twse_holidays = {
         "2026-01-01", "2026-02-12", "2026-02-13", "2026-02-16", "2026-02-17", 
         "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-27", "2026-04-03", 
         "2026-04-06", "2026-05-01", "2026-06-19", "2026-09-25", "2026-09-28", 
@@ -85,7 +67,7 @@ def get_next_business_days(start_date_str, count=5):
         date_iso = current_date.strftime("%Y-%m-%d")
         
         is_weekend = current_date.weekday() >= 5
-        is_twse_holiday = date_iso in twse_holidays_2026
+        is_twse_holiday = date_iso in twse_holidays
         
         if not is_weekend and not is_twse_holiday:
             weekday_cc = ["一", "二", "三", "四", "五", "六", "日"]
@@ -96,23 +78,17 @@ def get_next_business_days(start_date_str, count=5):
 
 
 def check_disposal_condition(sum_ret, spread):
-    """
-    判定是否達到注意股門檻二（累積漲跌幅 >= 25% 且 價差 >= 50元）
-    """
+    """判定是否達到注意股門檻二"""
     return sum_ret >= 25.0 and spread >= 50.0
 
 
 def fetch_twse_notices_and_punishes(stock_id, target_date_str):
-    """
-    對接證交所官方開放 JSON API 資料庫
-    """
+    """對接證交所官方開放 JSON API 資料庫"""
     api_date = target_date_str.replace("-", "")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    
-    notice_info = "無"
-    punish_info = "無"
+    notice_info, punish_info = "無", "無"
     
     try:
         api_notice_url = f"https://www.twse.com.tw/rwd/zh/announcement/notice?date={api_date}&response=json"
@@ -121,8 +97,7 @@ def fetch_twse_notices_and_punishes(stock_id, target_date_str):
             data_n = res_n.json()
             if "data" in data_n:
                 for row in data_n["data"]:
-                    row_str = " ".join([str(x) for x in row])
-                    if stock_id in row_str:
+                    if stock_id in " ".join([str(x) for x in row]):
                         notice_info = "🔴 已列入官方注意股名單！"
                         break
 
@@ -132,22 +107,17 @@ def fetch_twse_notices_and_punishes(stock_id, target_date_str):
             data_p = res_p.json()
             if "data" in data_p:
                 for row in data_p["data"]:
-                    row_str = " ".join([str(x) for x in row])
-                    if stock_id in row_str:
+                    if stock_id in " ".join([str(x) for x in row]):
                         punish_info = "🍇 警告：已正式列入官方處置股票名單！"
                         break
-                        
-    except Exception as e:
-        notice_info = "官方連線異常"
-        punish_info = "官方連線異常"
+    except:
+        notice_info, punish_info = "官方連線異常", "官方連線異常"
 
     return notice_info, punish_info
 
 
 def find_trigger_price_for_day(base_price, sum_past_4, compare_base_price):
-    """
-    精確反推當天要達到門檻二所需要的最低注意觸發價
-    """
+    """精確反推當天要達到門檻二所需要的最低注意觸發價"""
     price_by_spread = compare_base_price + 50
     req_ret = 25.0 - sum_past_4
     price_by_ret = base_price * (1 + req_ret / 100)
@@ -166,29 +136,52 @@ def find_trigger_price_for_day(base_price, sum_past_4, compare_base_price):
 
 
 # ==========================================
-# 👑 核心主要畫面區塊 (移除 Sidebar 行事曆)
+# 👑 核心主要畫面區塊
 # ==========================================
 st.title("📈 處置股 / 注意股【一整週】雙指標實戰預測器")
-st.write(
-    "自動抓取收盤價，模擬**「天天鎖漲停」**與**「注意股觸發價」**之雙重對照。已智慧融合證交所開休市行事曆過濾！"
-)
+st.write("自動抓取收盤價，模擬**「天天鎖漲停」**與**「注意股觸發價」**之雙重對照。支援盤中與剛收盤最新即時價捕獲！")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
 
 if stock_id:
-    with st.spinner("正在自 Yahoo Finance 抓取股票最新歷史股價..."):
+    with st.spinner("正在安全連線 Yahoo Finance 補抓當下最新即時數據..."):
         ticker_symbol = f"{stock_id}.TW"
         try:
             stock = yf.Ticker(ticker_symbol)
             df = stock.history(period="2mo", auto_adjust=False)  
-            stock_name = stock.info.get("shortName", "")
-            if not stock_name: stock_name = stock.info.get("longName", "")
+            stock_info = stock.info
+            stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+            
             if df.empty:
                 ticker_symbol = f"{stock_id}.TWO"
                 stock = yf.Ticker(ticker_symbol)
                 df = stock.history(period="2mo", auto_adjust=False)
-                stock_name = stock.info.get("shortName", "")
+                stock_info = stock.info
+                stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+
+            # 🛠️ 【修正關鍵核心】：強制捕獲最新未定案盤中價/剛收盤價
+            try:
+                fast_info = stock.fast_info
+                latest_realtime_price = fast_info.get("lastPrice", None)
+                
+                # 取得本地今日日期 (格式: YYYY-MM-DD)
+                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                
+                if latest_realtime_price is not None and not df.empty:
+                    last_df_date = df.index[-1].strftime("%Y-%m-%d")
+                    # 如果歷史 K 線資料落後了（沒抓到今天），或者今天的收盤價與即時最新價不同步，強制覆蓋/插入最新一筆
+                    if last_df_date != today_str:
+                        new_row = pd.DataFrame(
+                            [[latest_realtime_price]*5 + [0]], 
+                            columns=["Open", "High", "Low", "Close", "Volume", "Dividends"],
+                            index=[pd.to_datetime(today_str)]
+                        )
+                        df = pd.concat([df, new_row])
+                    else:
+                        df.iloc[-1, df.columns.get_loc("Close")] = latest_realtime_price
+            except Exception as realtime_err:
+                pass # 若 fast_info 失敗則沿用原 history
 
         except Exception as e:
             st.error(f"網路連線錯誤: {e}")
@@ -259,7 +252,7 @@ if stock_id:
         future_dates = get_next_business_days(today_date, count=5)
         history_df = pd.DataFrame(list(reversed(history_rows)))
 
-        st.subheader(f"📊 歷史今日截止（含 {today_date}）近 6 日累積數據明細")
+        st.subheader(f"📊 歷史今日截止（含最新即時價日期：{today_date}）近 6 日累積數據明細")
         col_t1, col_t2 = st.columns([2, 1])
         with col_t1:
             def style_limit_prices(row):
@@ -285,7 +278,7 @@ if stock_id:
                 hide_index=True
             )
         with col_t2:
-            st.metric(label=f"今日最新真實收盤價 ({today_date})", value=f"{today_price:.2f} 元")
+            st.metric(label=f"當前最新即時/收盤價 ({today_date})", value=f"{today_price:.2f} 元")
             st.metric(label="歷史近 6 日累積漲跌幅總和", value=f"{sum_history_6days:.2f} %")
             st.metric(label="今日近 6 日真實價差", value=f"{today_history_spread:.2f} 元", delta=f"區間第一天收盤價: {today_start_price:.2f} 元", delta_color="off")
             st.markdown("---")
@@ -302,7 +295,7 @@ if stock_id:
         # 【部分二：雙指標一週天天漲停推演】
         # ==========================================
         st.subheader("🔮 實戰推演：未來一整週「天天鎖漲停」vs「注意股觸發價」對照預測")
-        st.write("💡 *智慧過濾器已啟動：遇到國定休假與長假，程式會自動跳至下一個實際有交易的營業日推算！*")
+        st.write("💡 *智慧過濾器已啟動：自動以最新捕獲的日期為起點，往後推演實際有交易的 5 個營業日！*")
 
         sim_prices = []
         current_base_price = today_price
