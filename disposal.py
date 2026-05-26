@@ -160,27 +160,30 @@ if stock_id:
                 stock_info = stock.info
                 stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
 
-            # 🛠️ 【修正核心點】：修正 DatetimeIndex 連接轉型錯誤
-            try:
-                fast_info = stock.fast_info
-                latest_realtime_price = fast_info.get("lastPrice", None)
+            # 🛠️ 終極修正：將 DataFrame 的索引轉換成無時區的純日期字串，徹底斬斷轉型錯誤！
+            if not df.empty:
+                df.index = df.index.tz_localize(None)
                 
-                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-                
-                if latest_realtime_price is not None and not df.empty:
-                    last_df_date = df.index[-1].strftime("%Y-%m-%d")
-                    if last_df_date != today_str:
-                        # 關鍵：建立時強制使用 pd.DatetimeIndex 確保格式完全一致
-                        new_row = pd.DataFrame(
-                            [[latest_realtime_price]*5 + [0]], 
-                            columns=["Open", "High", "Low", "Close", "Volume", "Dividends"],
-                            index=pd.DatetimeIndex([today_str])
-                        )
-                        df = pd.concat([df, new_row])
-                    else:
-                        df.iloc[-1, df.columns.get_loc("Close")] = latest_realtime_price
-            except Exception as realtime_err:
-                pass 
+                try:
+                    fast_info = stock.fast_info
+                    latest_realtime_price = fast_info.get("lastPrice", None)
+                    
+                    # 取得今天日期（與 yf 相同的 Timestamp 格式）
+                    today_ts = pd.Timestamp(datetime.date.today())
+                    
+                    if latest_realtime_price is not None:
+                        # 檢查最後一筆的日期是否就是今天
+                        if df.index[-1].date() != today_ts.date():
+                            # 如果 yf 漏掉了今天，直接在最後一行追加新資料列，避開 concat 轉型陷阱
+                            df.loc[today_ts] = [
+                                latest_realtime_price, latest_realtime_price, 
+                                latest_realtime_price, latest_realtime_price, 0, 0
+                            ]
+                        else:
+                            # 如果今天已經存在，直接更新它的收盤價為最新即時價
+                            df.iloc[-1, df.columns.get_loc("Close")] = latest_realtime_price
+                except Exception as realtime_err:
+                    pass 
 
         except Exception as e:
             st.error(f"網路連線錯誤: {e}")
@@ -195,7 +198,7 @@ if stock_id:
     if not df.empty and len(df) >= 15:
         all_prices = df["Close"].tolist()
         
-        # 🛠️ 由於已經確保了 index 是 DatetimeIndex 格式，這裡的轉型就不再會噴錯
+        # 💡 此時 df.index 已經在上方被完全清洗成乾淨的 DatetimeIndex，絕對能流暢執行 strftime
         all_dates = df.index.strftime("%Y-%m-%d").tolist()
         
         today_price = all_prices[-1]
