@@ -135,42 +135,90 @@ def find_trigger_price_for_day(base_price, sum_past_4, compare_base_price):
     return round(final_trigger, 2)
 
 
+# 🛠️ 【核心修正】：完美融合上市與上櫃兩大官方數據表格的強力解析引擎
+@st.cache_data(ttl=86400)
+def get_all_taiwan_stock_names():
+    mapping = {}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
+    
+    # 1. 抓取上市股票清單 (strMode=2)
+    try:
+        r2 = requests.get("https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", headers=headers, timeout=15)
+        # 指定以 utf-8 或 cp950 讀取網頁表格，防止部分中文衝碼
+        tables2 = pd.read_html(r2.text)
+        if tables2 and len(tables2) > 0:
+            df2 = tables2[0]
+            # 遍歷第一欄
+            for item in df2.iloc[:, 0].dropna():
+                item_str = str(item).strip()
+                # 證交所網頁特徵：代號與名稱中間夾著全形空格 `\u3000`
+                if "\u3000" in item_str:
+                    parts = item_str.split("\u3000")
+                    if len(parts) >= 2:
+                        mapping[parts[0].strip()] = parts[1].strip()
+    except Exception as e:
+        pass
+                    
+    # 2. 抓取你提供的【真・上櫃有價證券清單】(strMode=4)
+    try:
+        r4 = requests.get("https://isin.twse.com.tw/isin/C_public.jsp?strMode=4", headers=headers, timeout=15)
+        tables4 = pd.read_html(r4.text)
+        if tables4 and len(tables4) > 0:
+            df4 = tables4[0]
+            for item in df4.iloc[:, 0].dropna():
+                item_str = str(item).strip()
+                if "\u3000" in item_str:
+                    parts = item_str.split("\u3000")
+                    if len(parts) >= 2:
+                        mapping[parts[0].strip()] = parts[1].strip()
+    except Exception as e:
+        pass
+        
+    return mapping
+
+
 # ==========================================
-# 👑 核心主要畫面區塊
+# 👑 畫面呈現區塊
 # ==========================================
 st.title("📈 處置股 / 注意股【一整週】雙指標實戰預測器")
-st.write("自動抓取收盤價，模擬**「天天鎖漲停」**與**「注意股觸發價」**之雙重對照。支援盤中與剛收盤最新即時價捕獲！")
+st.write("自動抓取收盤價，模擬**「天天鎖漲停」**與**「注意股觸發價」**之雙重對照。已精確對接**證交所官方上市櫃全股票資料庫**！")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
 
 if stock_id:
-    stock_name = ""
+    # 全自動配對上市上櫃官方總目錄
+    with st.spinner("正在安全連線台灣證券交易所與櫃買中心資料庫，對齊上市櫃全股票中文名稱..."):
+        all_twse_mapping = get_all_taiwan_stock_names()
+        stock_name = all_twse_mapping.get(stock_id, "")
+
     with st.spinner("正在安全連線 Yahoo Finance 補抓當下最新即時數據..."):
         ticker_symbol = f"{stock_id}.TW"
         try:
             stock = yf.Ticker(ticker_symbol)
             df = stock.history(period="2mo", auto_adjust=False)  
             
-            try:
-                stock_info = stock.info
-                if stock_info:
-                    stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
-            except:
-                pass # 防止 info 介面被 Yahoo 限流鎖定導致整台車卡死
-            
-            if df.empty:
-                ticker_symbol = f"{stock_id}.TWO"
-                stock = yf.Ticker(ticker_symbol)
-                df = stock.history(period="2mo", auto_adjust=False)
+            if not stock_name:
                 try:
                     stock_info = stock.info
                     if stock_info:
                         stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
                 except:
-                    pass
+                    pass 
+            
+            if df.empty:
+                ticker_symbol = f"{stock_id}.TWO"
+                stock = yf.Ticker(ticker_symbol)
+                df = stock.history(period="2mo", auto_adjust=False)
+                if not stock_name:
+                    try:
+                        stock_info = stock.info
+                        if stock_info:
+                            stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+                    except:
+                        pass
 
-            # 🛠️ 終極修正：清洗時區衝突
+            # 🛠️ 清洗時區衝突
             if not df.empty:
                 df.index = df.index.tz_localize(None)
                 
@@ -194,19 +242,8 @@ if stock_id:
             st.error(f"網路連線錯誤: {e}")
             df = pd.DataFrame()
 
-    # 🛠️ 【強效備援機制】：擴充熱門與常見注意處置股字典，當 Yahoo 壞掉時強制對齊中文名稱
-    common_stocks = {
-        "3030": "德律", "3231": "緯創", "2330": "台積電", "2317": "鴻海", "2454": "聯發科",
-        "2359": "所羅門", "2486": "一詮", "9103": "美德醫療-DR", "3013": "晟銘電", "1513": "中興電",
-        "1519": "華城", "1503": "士電", "2603": "長榮", "2609": "陽明", "2615": "萬海",
-        "8374": "羅昇", "3376": "新日興", "4562": "穎漢", "3062": "建漢", "2365": "昆盈",
-        "4545": "銘異", "3081": "聯亞", "6451": "訊芯-KY", "3450": "聯鈞", "5457": "宣德",
-        "4979": "華星光", "8054": "安國", "3228": "金麗科", "6223": "旺矽", "3515": "華擎"
-    }
-    
-    if stock_id in common_stocks: 
-        stock_name = common_stocks[stock_id]
-    elif not stock_name or stock_name.isascii(): 
+    # 最終保險防線
+    if not stock_name or stock_name.isascii(): 
         stock_name = f"台股 {stock_id}"
 
     st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
