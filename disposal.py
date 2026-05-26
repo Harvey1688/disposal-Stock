@@ -145,42 +145,47 @@ st.markdown("---")
 stock_id = st.text_input("請輸入台股代號", value="").strip()
 
 if stock_id:
+    stock_name = ""
     with st.spinner("正在安全連線 Yahoo Finance 補抓當下最新即時數據..."):
         ticker_symbol = f"{stock_id}.TW"
         try:
             stock = yf.Ticker(ticker_symbol)
             df = stock.history(period="2mo", auto_adjust=False)  
-            stock_info = stock.info
-            stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+            
+            try:
+                stock_info = stock.info
+                if stock_info:
+                    stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+            except:
+                pass # 防止 info 介面被 Yahoo 限流鎖定導致整台車卡死
             
             if df.empty:
                 ticker_symbol = f"{stock_id}.TWO"
                 stock = yf.Ticker(ticker_symbol)
                 df = stock.history(period="2mo", auto_adjust=False)
-                stock_info = stock.info
-                stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+                try:
+                    stock_info = stock.info
+                    if stock_info:
+                        stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
+                except:
+                    pass
 
-            # 🛠️ 終極修正：將 DataFrame 的索引轉換成無時區的純日期字串，徹底斬斷轉型錯誤！
+            # 🛠️ 終極修正：清洗時區衝突
             if not df.empty:
                 df.index = df.index.tz_localize(None)
                 
                 try:
                     fast_info = stock.fast_info
                     latest_realtime_price = fast_info.get("lastPrice", None)
-                    
-                    # 取得今天日期（與 yf 相同的 Timestamp 格式）
                     today_ts = pd.Timestamp(datetime.date.today())
                     
                     if latest_realtime_price is not None:
-                        # 檢查最後一筆的日期是否就是今天
                         if df.index[-1].date() != today_ts.date():
-                            # 如果 yf 漏掉了今天，直接在最後一行追加新資料列，避開 concat 轉型陷阱
                             df.loc[today_ts] = [
                                 latest_realtime_price, latest_realtime_price, 
                                 latest_realtime_price, latest_realtime_price, 0, 0
                             ]
                         else:
-                            # 如果今天已經存在，直接更新它的收盤價為最新即時價
                             df.iloc[-1, df.columns.get_loc("Close")] = latest_realtime_price
                 except Exception as realtime_err:
                     pass 
@@ -189,16 +194,25 @@ if stock_id:
             st.error(f"網路連線錯誤: {e}")
             df = pd.DataFrame()
 
-    common_stocks = {"3030": "德律", "3231": "緯創", "2330": "台積電", "2317": "鴻海", "2454": "聯發科"}
-    if stock_id in common_stocks: stock_name = common_stocks[stock_id]
-    elif not stock_name or stock_name.isascii(): stock_name = f"台股 {stock_id}"
+    # 🛠️ 【強效備援機制】：擴充熱門與常見注意處置股字典，當 Yahoo 壞掉時強制對齊中文名稱
+    common_stocks = {
+        "3030": "德律", "3231": "緯創", "2330": "台積電", "2317": "鴻海", "2454": "聯發科",
+        "2359": "所羅門", "2486": "一詮", "9103": "美德醫療-DR", "3013": "晟銘電", "1513": "中興電",
+        "1519": "華城", "1503": "士電", "2603": "長榮", "2609": "陽明", "2615": "萬海",
+        "8374": "羅昇", "3376": "新日興", "4562": "穎漢", "3062": "建漢", "2365": "昆盈",
+        "4545": "銘異", "3081": "聯亞", "6451": "訊芯-KY", "3450": "聯鈞", "5457": "宣德",
+        "4979": "華星光", "8054": "安國", "3228": "金麗科", "6223": "旺矽", "3515": "華擎"
+    }
+    
+    if stock_id in common_stocks: 
+        stock_name = common_stocks[stock_id]
+    elif not stock_name or stock_name.isascii(): 
+        stock_name = f"台股 {stock_id}"
 
     st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
 
     if not df.empty and len(df) >= 15:
         all_prices = df["Close"].tolist()
-        
-        # 💡 此時 df.index 已經在上方被完全清洗成乾淨的 DatetimeIndex，絕對能流暢執行 strftime
         all_dates = df.index.strftime("%Y-%m-%d").tolist()
         
         today_price = all_prices[-1]
