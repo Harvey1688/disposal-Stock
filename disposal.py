@@ -160,28 +160,27 @@ if stock_id:
                 stock_info = stock.info
                 stock_name = stock_info.get("shortName", stock_info.get("longName", ""))
 
-            # 🛠️ 【修正關鍵核心】：強制捕獲最新未定案盤中價/剛收盤價
+            # 🛠️ 【修正核心點】：修正 DatetimeIndex 連接轉型錯誤
             try:
                 fast_info = stock.fast_info
                 latest_realtime_price = fast_info.get("lastPrice", None)
                 
-                # 取得本地今日日期 (格式: YYYY-MM-DD)
                 today_str = datetime.datetime.now().strftime("%Y-%m-%d")
                 
                 if latest_realtime_price is not None and not df.empty:
                     last_df_date = df.index[-1].strftime("%Y-%m-%d")
-                    # 如果歷史 K 線資料落後了（沒抓到今天），或者今天的收盤價與即時最新價不同步，強制覆蓋/插入最新一筆
                     if last_df_date != today_str:
+                        # 關鍵：建立時強制使用 pd.DatetimeIndex 確保格式完全一致
                         new_row = pd.DataFrame(
                             [[latest_realtime_price]*5 + [0]], 
                             columns=["Open", "High", "Low", "Close", "Volume", "Dividends"],
-                            index=[pd.to_datetime(today_str)]
+                            index=pd.DatetimeIndex([today_str])
                         )
                         df = pd.concat([df, new_row])
                     else:
                         df.iloc[-1, df.columns.get_loc("Close")] = latest_realtime_price
             except Exception as realtime_err:
-                pass # 若 fast_info 失敗則沿用原 history
+                pass 
 
         except Exception as e:
             st.error(f"網路連線錯誤: {e}")
@@ -195,9 +194,12 @@ if stock_id:
 
     if not df.empty and len(df) >= 15:
         all_prices = df["Close"].tolist()
+        
+        # 🛠️ 由於已經確保了 index 是 DatetimeIndex 格式，這裡的轉型就不再會噴錯
         all_dates = df.index.strftime("%Y-%m-%d").tolist()
         
-        latest_price = all_prices[-1]
+        today_price = all_prices[-1]
+        today_date = all_dates[-1]
 
         # ==========================================
         # 【歷史回溯診斷】
@@ -244,8 +246,6 @@ if stock_id:
             })
 
         sum_history_6days = sum(history_truncated_returns)
-        today_price = all_prices[-1]
-        today_date = all_dates[-1]
         today_start_price = all_prices[-6]
         today_history_spread = today_price - today_start_price
 
