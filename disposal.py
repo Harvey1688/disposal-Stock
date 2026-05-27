@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-# 設定網頁標題與風格 (滿版模式)
+# 設定網頁標題與風格
 st.set_page_config(page_title="處置股/注意股 終極法規控盤羅盤", layout="wide")
 
 
@@ -65,50 +65,57 @@ def get_next_business_days(start_date_str, count=5):
     return business_days
 
 
-def diagnose_all_regulatory_天書(prices_list, target_idx, open_price, prev_close_price):
+def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     """
-    👑 智慧核心：內嵌三大排外過濾器的法規判定引擎
+    👑 智慧核心：內嵌三大排外過濾器與即時 6 日明細抓取的法規判定引擎
     """
     triggered_rules = []
-    exempt_reasons = [] # 儲存被放過的理由
+    exempt_reasons = [] 
     is_danger = False
     
-    # 1. 預先計算基礎的「最近 6 日累積漲跌幅」，供後續所有條款與排外機制共用
+    # 建立一個供視覺化回傳的這 6 天明細 Dataframe 清單
+    window_df = pd.DataFrame()
     sum_ret_6d = 0.0
-    if target_idx >= 5:
-        returns_6d = []
-        for k in range(5):
-            p_f = prices_list[target_idx - 5 + k]
-            p_t = prices_list[target_idx - 4 + k]
-            returns_6d.append(truncate_2_decimals((p_t - p_f) / p_f * 100))
-        sum_ret_6d = sum(returns_6d)
 
-    # ----------------------------------------------------
-    # 【第一款檢查 (短線 6日)】
-    # ----------------------------------------------------
-    is_first_rule_hit = False
     if target_idx >= 5:
+        # 抓取這 6 天的起訖
+        sub_prices = prices_list[target_idx - 5 : target_idx + 1]
+        sub_dates = dates_list[target_idx - 5 : target_idx + 1]
+        
+        history_truncated_returns = [0.0]  # 第一天為基期，漲幅為 0
+        for k in range(5):
+            p_f = sub_prices[k]
+            p_t = sub_prices[k + 1]
+            history_truncated_returns.append(truncate_2_decimals((p_t - p_f) / p_f * 100))
+        
+        sum_ret_6d = sum(history_truncated_returns)
+        
+        window_df = pd.DataFrame({
+            "營業日": sub_dates,
+            "收盤價 (元)": [f"{p:.2f}" for p in sub_prices],
+            "當日累積漲跌幅": [f"{r:+.2f}%" if r != 0 else "0.00%" for r in history_truncated_returns]
+        })
+
+        # ----------------------------------------------------
+        # 【第一款檢查 (短線 6日)】
+        # ----------------------------------------------------
         p_start_6d = prices_list[target_idx - 5]
         p_target = prices_list[target_idx]
         spread_6d = p_target - p_start_6d
         
         if sum_ret_6d >= 25.0:
-            # 基本盤：只要超過25%先列入注意候選
-            is_first_rule_hit = True
             triggered_rules.append(f"🔴 觸發【第一款】：6日累積漲幅達 {sum_ret_6d:.2f}% (價差 {spread_6d:.2f} 元)。")
             is_danger = True
 
     # ----------------------------------------------------
     # 【第二款檢查：長線歷史基期異常 (30日 / 60日 / 90日)】
     # ----------------------------------------------------
-    # 30日條款
     if target_idx >= 29:
         p_start_30d = prices_list[target_idx - 29]
         p_target = prices_list[target_idx]
         pct_30d = (p_target - p_start_30d) / p_start_30d * 100
         
         if abs(pct_30d) > 100.0:
-            # 🚨 啟動過濾器：當符合第二款時，檢查三大排外豁免條件
             is_exempt = False
             
             # 豁免條件 1：最近 6 天很乖（累積漲跌幅未超過 25%）
@@ -116,14 +123,10 @@ def diagnose_all_regulatory_天書(prices_list, target_idx, open_price, prev_clo
                 is_exempt = True
                 exempt_reasons.append(f"🟢 豁免放過 (條件1)：雖然30日漲幅達 {pct_30d:.2f}%，但近6日累積僅 {sum_ret_6d:.2f}% (未超25%乖巧線)，不予公布第二款。")
             
-            # 豁免條件 3：30天看漲，但最近6天在跌 (方向相反)
+            # 豁免條件 3：方向相反
             elif pct_30d * sum_ret_6d < 0:
                 is_exempt = True
                 exempt_reasons.append(f"🟢 豁免放過 (條件3)：30日趨勢與近6日回檔方向相反 (短線已在修正)，不予公布第二款。")
-                
-            # 豁免條件 2：雖然最近也漲，但同類股都在漲（與類股差幅未達20%/85%等，程式預設留作提示）
-            else:
-                pass # 差幅由操作者手動比對大盤
                 
             if not is_exempt:
                 triggered_rules.append(f"🔴 觸發【第二款-30日爆發】：30日變動達 {pct_30d:.2f}% (超過100%紅線)，且不符合排外豁免。")
@@ -153,13 +156,13 @@ def diagnose_all_regulatory_天書(prices_list, target_idx, open_price, prev_clo
                 triggered_rules.append(f"🔴 觸發【第二款-90日終極】：90日變動達 {pct_90d:.2f}% (超過160%巨型紅線)。")
                 is_danger = True
 
-    return is_danger, triggered_rules, exempt_reasons
+    return is_danger, triggered_rules, exempt_reasons, window_df
 
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：處置股 / 注意股【排外過濾器版】終極預測器")
-st.write("已完美內嵌**「30日爆漲、但近6日未過25%」**與**「長短線方向相反」**之三大豁免過濾器邏輯！")
+st.title("飯店級智慧看盤：處置股 / 注意股【6日累積明細全展開版】")
+st.write("已完美結合 6 天內收盤價與累積漲幅明細表格，拒絕模糊文字，控盤數據一目了然！")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
@@ -202,24 +205,26 @@ if stock_id:
         
         today_price = all_prices[-1]
         today_date = all_dates[-1]
-        today_open = df.iloc[-1]["Open"]
-        prev_close = df.iloc[-2]["Close"]
 
         # ==========================================
-        # 📊 歷史今日狀態診斷 (紅綠燈系統)
+        # 📊 歷史今日狀態診斷 (大字紅綠燈看板)
         # ==========================================
-        st.subheader(f"🏛    證交所注意條款歷史狀態診斷 ({today_date} 截止)")
+        st.subheader(f"🏛 證交所注意條款歷史狀態診斷 ({today_date} 截止)")
         
-        is_today_danger, today_rules, today_exempts = diagnose_all_regulatory_天書(all_prices, len(all_prices) - 1, today_open, prev_close)
+        is_today_danger, today_rules, today_exempts, today_window_df = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
         
-        # 顯示豁免訊息看板
+        # 💡 核心亮點 1：今日截止的 6 日歷史收盤價與累積漲幅明細大公開
+        if not today_window_df.empty:
+            st.markdown("##### 📊 截止今日（含當天）之 6 個營業日收盤價與累積變動明細：")
+            st.dataframe(today_window_df, use_container_width=True, hide_index=True)
+
         if today_exempts:
             for ex in today_exempts:
                 st.success(ex)
 
         if is_today_danger:
             st.markdown(f"""
-            <div style='background-color:#fce8e6; border-left:6px solid #ef5350; padding:15px; border-radius:5px; color:#ef5350; margin-bottom:15px;'>
+            <div style='background-color:#fce8e6; border-left:6px solid #ef5350; padding:15px; border-radius:5px; color:#ef5350; margin-top:15px; margin-bottom:15px;'>
                 <span style='font-size:24px; font-weight:bold;'>🔴 今日狀態：已進入法規監控紅線區！</span><br>
                 <div style='margin-top:8px; font-size:13px; color:#555555;'>💡 提示：若以下條款與「類股/大盤平均」之差幅未達法規標準（條件2：差幅未過 20% / 85%），則可啟用大盤保護傘安全除外。</div>
                 <ul style='margin-top:10px; font-size:15px; color:#111111; font-weight:500;'>
@@ -229,7 +234,7 @@ if stock_id:
             """, unsafe_allow_html=True)
         else:
             st.markdown("""
-            <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-bottom:15px; font-size:24px; font-weight:bold;'>
+            <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-top:15px; margin-bottom:15px; font-size:24px; font-weight:bold;'>
                 🟢 今日狀態：未超過法規規定（安全綠燈）
             </div>
             """, unsafe_allow_html=True)
@@ -243,6 +248,7 @@ if stock_id:
         future_dates = get_next_business_days(today_date, count=5)
         
         sim_prices = list(all_prices)
+        sim_dates = list(all_dates)
         current_price = today_price
         
         row1_col1, row1_col2, row1_col3 = st.columns(3)
@@ -255,7 +261,11 @@ if stock_id:
             next_limit_up = calculate_limit_up(current_price)
             sim_prices.append(next_limit_up)
             
-            is_sim_danger, sim_rules, sim_exempts = diagnose_all_regulatory_天書(sim_prices, len(sim_prices) - 1, current_price, current_price)
+            # 建立未來模擬的 ISO 日期字串
+            raw_date_label = future_dates[d_idx].split(" ")[0] # 取得像 05/26 這樣的字串
+            sim_dates.append(f"2026-{raw_date_label.replace('/', '-')}")
+            
+            is_sim_danger, sim_rules, sim_exempts, sim_window_df = diagnose_all_regulatory_天書(sim_prices, sim_dates, len(sim_prices) - 1)
             
             if is_sim_danger:
                 notice_days_count += 1
@@ -270,7 +280,6 @@ if stock_id:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 在卡片中秀出未來的豁免狀況
                 if sim_exempts:
                     for sex in sim_exempts:
                         st.caption(sex)
@@ -278,11 +287,15 @@ if stock_id:
                 if is_sim_danger:
                     rules_html = "".join([f"<div style='margin-bottom:6px;'>• {r}</div>" for r in sim_rules])
                     st.markdown(f"""
-                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:10px; border-radius:5px; color:#ef5350; font-size:13px; line-height:1.5;'>
+                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:10px; border-radius:5px; color:#ef5350; font-size:13px; line-height:1.5; margin-bottom:10px;'>
                         <b style='font-size:14px;'>🔴 警報：若收此價將踩中下列法規：</b><br>
                         <div style='color:#333333; margin-top:5px;'>{rules_html}</div>
                     </div>
                     """, unsafe_allow_html=True)
+                    
+                    # 💡 核心亮點 2：在未來預測紅燈卡片內，直接動態拉出這 6 天的推演收盤價與漲幅表格！
+                    st.markdown("<small>📋 當天往前推算之 6 日累積變動數據明細：</small>", unsafe_allow_html=True)
+                    st.dataframe(sim_window_df, use_container_width=True, hide_index=True)
                 else:
                     st.markdown("""
                     <div style='background-color:#e2f0d9; border-left:4px solid #2b8a3e; padding:10px; border-radius:5px; color:#2b8a3e; font-size:14px; font-weight:bold;'>
