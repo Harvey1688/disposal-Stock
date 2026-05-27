@@ -89,7 +89,6 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
             p_t = sub_prices[k + 1]
             history_truncated_returns.append(truncate_2_decimals((p_t - p_f) / p_f * 100))
             
-            # 計算當天的法定漲跌停價，判斷是否鎖死
             l_up = calculate_limit_up(p_f)
             l_down = calculate_limit_down(p_f)
             is_limit_up_list.append(abs(p_t - l_up) < 1e-4)
@@ -180,7 +179,6 @@ def render_styled_dataframe(display_df):
             styles[c_idx] = "background-color: #2b8a3e; color: white; font-weight: bold;"
         return styles
 
-    # 格式化輸出並隱藏輔助用的判斷布林欄位
     st.dataframe(
         display_df.style.apply(style_rows, axis=1).format({"收盤價 (元)": "{:.2f}"}),
         column_config={"is_limit_up": None, "is_limit_down": None},
@@ -192,8 +190,8 @@ def render_styled_dataframe(display_df):
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：處置股 / 注意股【收盤價紅綠燈變色版】")
-st.write("已完美融合 6 天收盤價明細，並且**「漲停自動亮紅底白字、跌停自動亮綠底白字」**！")
+st.title("飯店級智慧看盤：處置股 / 注意股【數據匹配核對完全體】")
+st.write("已整合長短線法規、三大豁免過濾器、6日數據展開、收盤漲跌停著色，並在底部完整加回官方比對傳送門。")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
@@ -244,7 +242,6 @@ if stock_id:
         
         is_today_danger, today_rules, today_exempts, today_window_df = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
         
-        # 💡 歷史 6 日明細表套用漲跌停變色
         if not today_window_df.empty:
             st.markdown("##### 📊 截止今日（含當天）之 6 個營業日收盤價與累積變動明細：")
             render_styled_dataframe(today_window_df)
@@ -323,13 +320,12 @@ if stock_id:
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 💡 未來 5 日卡片下方的表格也同步套用漲跌停變色
                     st.markdown("<small>📋 當天往前推算之 6 日累積變動數據明細：</small>", unsafe_allow_html=True)
                     render_styled_dataframe(sim_window_df)
                 else:
                     st.markdown("""
                     <div style='background-color:#e2f0d9; border-left:4px solid #2b8a3e; padding:10px; border-radius:5px; color:#2b8a3e; font-size:14px; font-weight:bold;'>
-                        🟢 綠燈安全：此價格仍未觸及任何一款長短線紅線（或符合排外條件）。
+                        🟢 綠燈安全：此價格仍未觸及 any 長短線紅線（或符合排外條件）。
                     </div>
                     """, unsafe_allow_html=True)
                     
@@ -357,3 +353,56 @@ if stock_id:
 
 else:
     st.info("💡 請在上方輸入框鍵入台股代號（例如：2492 華新科 或 3030 德律），系統將立即為您解開完整法規天書推演。")
+
+# ==========================================
+# 🏛️ 官方數據核對傳送門 (對齊生命線連結)
+# ==========================================
+st.markdown("---")
+st.markdown("### 🏛️ 證交所 / 櫃買中心 官方公告核對傳送門")
+st.write("💡 *請每天收盤下午 18:30 後點擊下方連結，核對本預測器算出來的數值是否與官方公告 100% 匹配精確：*")
+
+col_twse_1, col_twse_2, col_tpex_1, col_tpex_2 = st.columns(4)
+
+with col_twse_1:
+    st.markdown("""
+    <a href="https://www.twse.com.tw/zh/announcement/notice.html" target="_blank" style="text-decoration:none;">
+        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center; transition:0.3s;">
+            <span style="font-size:20px;">📈</span><br>
+            <b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br>
+            <span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意股票公告 ↗</span>
+        </div>
+    </a>
+    """, unsafe_allow_html=True)
+
+with col_twse_2:
+    st.markdown("""
+    <a href="https://www.twse.com.tw/zh/announcement/punish.html" target="_blank" style="text-decoration:none;">
+        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center; transition:0.3s;">
+            <span style="font-size:20px;">🚨</span><br>
+            <b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br>
+            <span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置股票公告 ↗</span>
+        </div>
+    </a>
+    """, unsafe_allow_html=True)
+
+with col_tpex_1:
+    st.markdown("""
+    <a href="https://www.tpex.org.tw/zh-tw/announce/market/attention.html" target="_blank" style="text-decoration:none;">
+        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center; transition:0.3s;">
+            <span style="font-size:20px;">📊</span><br>
+            <b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br>
+            <span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意有價證券 ↗</span>
+        </div>
+    </a>
+    """, unsafe_allow_html=True)
+
+with col_tpex_2:
+    st.markdown("""
+    <a href="https://www.tpex.org.tw/zh-tw/announce/market/disposal.html" target="_blank" style="text-decoration:none;">
+        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center; transition:0.3s;">
+            <span style="font-size:20px;">🔒</span><br>
+            <b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br>
+            <span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置有價證券 ↗</span>
+        </div>
+    </a>
+    """, unsafe_allow_html=True)
