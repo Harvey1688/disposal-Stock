@@ -67,33 +67,42 @@ def get_next_business_days(start_date_str, count=5):
 
 def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     """
-    👑 智慧核心：內嵌三大排外過濾器與即時 6 日明細抓取的法規判定引擎
+    👑 智慧核心：內嵌三大排外過濾器與動態漲跌停註記的判定引擎
     """
     triggered_rules = []
     exempt_reasons = [] 
     is_danger = False
     
-    # 建立一個供視覺化回傳的這 6 天明細 Dataframe 清單
     window_df = pd.DataFrame()
     sum_ret_6d = 0.0
 
     if target_idx >= 5:
-        # 抓取這 6 天的起訖
         sub_prices = prices_list[target_idx - 5 : target_idx + 1]
         sub_dates = dates_list[target_idx - 5 : target_idx + 1]
         
-        history_truncated_returns = [0.0]  # 第一天為基期，漲幅為 0
+        history_truncated_returns = [0.0]
+        is_limit_up_list = [False]
+        is_limit_down_list = [False]
+        
         for k in range(5):
             p_f = sub_prices[k]
             p_t = sub_prices[k + 1]
             history_truncated_returns.append(truncate_2_decimals((p_t - p_f) / p_f * 100))
+            
+            # 計算當天的法定漲跌停價，判斷是否鎖死
+            l_up = calculate_limit_up(p_f)
+            l_down = calculate_limit_down(p_f)
+            is_limit_up_list.append(abs(p_t - l_up) < 1e-4)
+            is_limit_down_list.append(abs(p_t - l_down) < 1e-4)
         
         sum_ret_6d = sum(history_truncated_returns)
         
         window_df = pd.DataFrame({
             "營業日": sub_dates,
-            "收盤價 (元)": [f"{p:.2f}" for p in sub_prices],
-            "當日累積漲跌幅": [f"{r:+.2f}%" if r != 0 else "0.00%" for r in history_truncated_returns]
+            "收盤價 (元)": sub_prices,
+            "當日累積漲跌幅": [f"{r:+.2f}%" if r != 0 else "0.00%" for r in history_truncated_returns],
+            "is_limit_up": is_limit_up_list,
+            "is_limit_down": is_limit_down_list
         })
 
         # ----------------------------------------------------
@@ -117,13 +126,9 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
         
         if abs(pct_30d) > 100.0:
             is_exempt = False
-            
-            # 豁免條件 1：最近 6 天很乖（累積漲跌幅未超過 25%）
             if abs(sum_ret_6d) <= 25.0:
                 is_exempt = True
                 exempt_reasons.append(f"🟢 豁免放過 (條件1)：雖然30日漲幅達 {pct_30d:.2f}%，但近6日累積僅 {sum_ret_6d:.2f}% (未超25%乖巧線)，不予公布第二款。")
-            
-            # 豁免條件 3：方向相反
             elif pct_30d * sum_ret_6d < 0:
                 is_exempt = True
                 exempt_reasons.append(f"🟢 豁免放過 (條件3)：30日趨勢與近6日回檔方向相反 (短線已在修正)，不予公布第二款。")
@@ -158,11 +163,37 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
 
     return is_danger, triggered_rules, exempt_reasons, window_df
 
+
+def render_styled_dataframe(display_df):
+    """
+    🛠️ 核心美化引擎：對表格的「收盤價 (元)」進行漲跌停紅綠燈渲染
+    """
+    if display_df.empty:
+        return
+        
+    def style_rows(row):
+        styles = [""] * len(row)
+        c_idx = display_df.columns.get_loc("收盤價 (元)")
+        if row["is_limit_up"]:
+            styles[c_idx] = "background-color: #ef5350; color: white; font-weight: bold;"
+        elif row["is_limit_down"]:
+            styles[c_idx] = "background-color: #2b8a3e; color: white; font-weight: bold;"
+        return styles
+
+    # 格式化輸出並隱藏輔助用的判斷布林欄位
+    st.dataframe(
+        display_df.style.apply(style_rows, axis=1).format({"收盤價 (元)": "{:.2f}"}),
+        column_config={"is_limit_up": None, "is_limit_down": None},
+        use_container_width=True,
+        hide_index=True
+    )
+
+
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：處置股 / 注意股【6日累積明細全展開版】")
-st.write("已完美結合 6 天內收盤價與累積漲幅明細表格，拒絕模糊文字，控盤數據一目了然！")
+st.title("飯店級智慧看盤：處置股 / 注意股【收盤價紅綠燈變色版】")
+st.write("已完美融合 6 天收盤價明細，並且**「漲停自動亮紅底白字、跌停自動亮綠底白字」**！")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
@@ -213,10 +244,10 @@ if stock_id:
         
         is_today_danger, today_rules, today_exempts, today_window_df = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
         
-        # 💡 核心亮點 1：今日截止的 6 日歷史收盤價與累積漲幅明細大公開
+        # 💡 歷史 6 日明細表套用漲跌停變色
         if not today_window_df.empty:
             st.markdown("##### 📊 截止今日（含當天）之 6 個營業日收盤價與累積變動明細：")
-            st.dataframe(today_window_df, use_container_width=True, hide_index=True)
+            render_styled_dataframe(today_window_df)
 
         if today_exempts:
             for ex in today_exempts:
@@ -261,8 +292,7 @@ if stock_id:
             next_limit_up = calculate_limit_up(current_price)
             sim_prices.append(next_limit_up)
             
-            # 建立未來模擬的 ISO 日期字串
-            raw_date_label = future_dates[d_idx].split(" ")[0] # 取得像 05/26 這樣的字串
+            raw_date_label = future_dates[d_idx].split(" ")[0]
             sim_dates.append(f"2026-{raw_date_label.replace('/', '-')}")
             
             is_sim_danger, sim_rules, sim_exempts, sim_window_df = diagnose_all_regulatory_天書(sim_prices, sim_dates, len(sim_prices) - 1)
@@ -293,9 +323,9 @@ if stock_id:
                     </div>
                     """, unsafe_allow_html=True)
                     
-                    # 💡 核心亮點 2：在未來預測紅燈卡片內，直接動態拉出這 6 天的推演收盤價與漲幅表格！
+                    # 💡 未來 5 日卡片下方的表格也同步套用漲跌停變色
                     st.markdown("<small>📋 當天往前推算之 6 日累積變動數據明細：</small>", unsafe_allow_html=True)
-                    st.dataframe(sim_window_df, use_container_width=True, hide_index=True)
+                    render_styled_dataframe(sim_window_df)
                 else:
                     st.markdown("""
                     <div style='background-color:#e2f0d9; border-left:4px solid #2b8a3e; padding:10px; border-radius:5px; color:#2b8a3e; font-size:14px; font-weight:bold;'>
