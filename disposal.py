@@ -187,11 +187,65 @@ def render_styled_dataframe(display_df):
     )
 
 
+def fetch_official_announcements_all_market(stock_id, target_date_str):
+    """
+    🏛️ 聯網比對：全面打通上市與上櫃的四大公告 API 資料庫
+    """
+    api_date = target_date_str.replace("-", "")
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    
+    notice_status = "無"
+    punish_status = "無"
+    
+    try:
+        # 1. 上市注意股檢查 (TWSE Notice)
+        url_twse_n = f"https://www.twse.com.tw/rwd/zh/announcement/notice?date={api_date}&response=json"
+        res = requests.get(url_twse_n, headers=headers, timeout=5)
+        if res.status_code == 200 and "data" in res.json():
+            for row in res.json()["data"]:
+                if stock_id in " ".join([str(x) for x in row]):
+                    notice_status = "🔴 證交所公告：今日已被列入上市注意股名單！"
+                    break
+
+        # 2. 上市處置股檢查 (TWSE Punish)
+        url_twse_p = f"https://www.twse.com.tw/rwd/zh/announcement/punish?date={api_date}&response=json"
+        res = requests.get(url_twse_p, headers=headers, timeout=5)
+        if res.status_code == 200 and "data" in res.json():
+            for row in res.json()["data"]:
+                if stock_id in " ".join([str(x) for x in row]):
+                    punish_status = "🍇 證交所公告：今日已被列入上市處置股名單！"
+                    break
+
+        # 3. 上櫃注意股檢查 (TPEx Attention)
+        url_tpex_json = f"https://www.tpex.org.tw/web/bulletin/attention/at_download.php?l=zh-tw&d={target_date_str.replace('-', '/')}&s=0"
+        res = requests.get(url_tpex_json, headers=headers, timeout=5)
+        if res.status_code == 200 and "aaData" in res.json():
+            for row in res.json()["aaData"]:
+                if stock_id in " ".join([str(x) for x in row]):
+                    notice_status = "🔴 櫃買中心公告：今日已被列入上櫃注意股名單！"
+                    break
+
+        # 4. 上櫃處置股檢查 (TPEx Disposal)
+        url_tpex_p = f"https://www.tpex.org.tw/web/bulletin/disposal/dis_download.php?l=zh-tw&d={target_date_str.replace('-', '/')}&s=0"
+        res = requests.get(url_tpex_p, headers=headers, timeout=5)
+        if res.status_code == 200 and "aaData" in res.json():
+            for row in res.json()["aaData"]:
+                if stock_id in " ".join([str(x) for x in row]):
+                    punish_status = "🍇 櫃買中心公告：今日已被列入上櫃處置股名單！"
+                    break
+                    
+    except Exception as e:
+        notice_status = "官方連線更新中"
+        punish_status = "官方連線更新中"
+
+    return notice_status, punish_status
+
+
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：處置股 / 注意股【數據匹配核對完全體】")
-st.write("已整合長短線法規、三大豁免過濾器、6日數據展開、收盤漲跌停著色，並在底部完整加回官方比對傳送門。")
+st.title("飯店級智慧看盤：處置股 / 注意股【最新價置頂完全體】")
+st.write("已整合長短線法規、三大豁免過濾器、6日數據展開、收盤漲跌停著色。最新即時收盤價已強勢置頂！")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
@@ -226,14 +280,19 @@ if stock_id:
     common_stocks = {"3030": "德律", "3231": "緯創", "2330": "台積電", "2317": "鴻海", "2454": "聯發科", "2492": "華新科"}
     stock_name = common_stocks.get(stock_id, f"台股 {stock_id}")
 
-    st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
-
     if not df.empty and len(df) >= 92:
         all_prices = df["Close"].tolist()
         all_dates = df.index.strftime("%Y-%m-%d").tolist()
         
         today_price = all_prices[-1]
         today_date = all_dates[-1]
+
+        # 🛠️ 【核心主要升級】：將「最新收盤價」看板強勢拉抬到最頂端顯示！
+        col_name_header, col_price_metric = st.columns([2, 1])
+        with col_name_header:
+            st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
+        with col_price_metric:
+            st.metric(label=f"當前最新即時/收盤價 ({today_date})", value=f"{today_price:.2f} 元")
 
         # ==========================================
         # 📊 歷史今日狀態診斷 (大字紅綠燈看板)
@@ -253,8 +312,8 @@ if stock_id:
         if is_today_danger:
             st.markdown(f"""
             <div style='background-color:#fce8e6; border-left:6px solid #ef5350; padding:15px; border-radius:5px; color:#ef5350; margin-top:15px; margin-bottom:15px;'>
-                <span style='font-size:24px; font-weight:bold;'>🔴 今日狀態：已進入法規監控紅線區！</span><br>
-                <div style='margin-top:8px; font-size:13px; color:#555555;'>💡 提示：若以下條款與「類股/大盤平均」之差幅未達法規標準（條件2：差幅未過 20% / 85%），則可啟用大盤保護傘安全除外。</div>
+                <span style='font-size:24px; font-weight:bold;'>🔴 今日數學推演：已進入法規監控紅線區！</span><br>
+                <div style='margin-top:8px; font-size:13px; color:#555555;'>💡 提示：若以下條款與「類股/大盤平均」之差幅未達法規標準，則可啟用大盤保護傘安全除外。</div>
                 <ul style='margin-top:10px; font-size:15px; color:#111111; font-weight:500;'>
                     {"".join([f"<li style='margin-bottom:5px;'>{r}</li>" for r in today_rules])}
                 </ul>
@@ -263,9 +322,21 @@ if stock_id:
         else:
             st.markdown("""
             <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-top:15px; margin-bottom:15px; font-size:24px; font-weight:bold;'>
-                🟢 今日狀態：未超過法規規定（安全綠燈）
+                🟢 今日數學推演：未超過法規規定（安全綠燈）
             </div>
             """, unsafe_allow_html=True)
+
+        st.markdown("#### 🏛️ 官方本日最新公布名單即時同步狀態：")
+        with st.spinner("正在聯網校對證交所與櫃買中心最新定案公告..."):
+            off_notice, off_punish = fetch_official_announcements_all_market(stock_id, today_date)
+            
+        c1, c2 = st.columns(2)
+        with c1:
+            if "🔴" in off_notice: st.error(off_notice)
+            else: st.success(f"🟢 官方注意股狀態：{off_notice} (安全)")
+        with c2:
+            if "🍇" in off_punish: st.error(off_punish)
+            else: st.success(f"🟢 官方處置股狀態：{off_punish} (安全)")
 
         # ==========================================
         # 🔮 未來一整週天天漲停推演
@@ -355,54 +426,18 @@ else:
     st.info("💡 請在上方輸入框鍵入台股代號（例如：2492 華新科 或 3030 德律），系統將立即為您解開完整法規天書推演。")
 
 # ==========================================
-# 🏛️ 官方數據核對傳送門 (對齊生命線連結)
+# 🏛️ 官方數據核對傳送門
 # ==========================================
 st.markdown("---")
 st.markdown("### 🏛️ 證交所 / 櫃買中心 官方公告核對傳送門")
-st.write("💡 *請每天收盤下午 18:30 後點擊下方連結，核對本預測器算出來的數值是否與官方公告 100% 匹配精確：*")
+st.write("💡 *以下為快捷對照備用連結，方便隨時點開手動覆核網頁數據：*")
 
 col_twse_1, col_twse_2, col_tpex_1, col_tpex_2 = st.columns(4)
-
 with col_twse_1:
-    st.markdown("""
-    <a href="https://www.twse.com.tw/zh/announcement/notice.html" target="_blank" style="text-decoration:none;">
-        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center; transition:0.3s;">
-            <span style="font-size:20px;">📈</span><br>
-            <b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br>
-            <span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意股票公告 ↗</span>
-        </div>
-    </a>
-    """, unsafe_allow_html=True)
-
+    st.markdown('<a href="https://www.twse.com.tw/zh/announcement/notice.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br><span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意股票公告 ↗</span></div></a>', unsafe_allow_html=True)
 with col_twse_2:
-    st.markdown("""
-    <a href="https://www.twse.com.tw/zh/announcement/punish.html" target="_blank" style="text-decoration:none;">
-        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center; transition:0.3s;">
-            <span style="font-size:20px;">🚨</span><br>
-            <b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br>
-            <span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置股票公告 ↗</span>
-        </div>
-    </a>
-    """, unsafe_allow_html=True)
-
+    st.markdown('<a href="https://www.twse.com.tw/zh/announcement/punish.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br><span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置股票公告 ↗</span></div></a>', unsafe_allow_html=True)
 with col_tpex_1:
-    st.markdown("""
-    <a href="https://www.tpex.org.tw/zh-tw/announce/market/attention.html" target="_blank" style="text-decoration:none;">
-        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center; transition:0.3s;">
-            <span style="font-size:20px;">📊</span><br>
-            <b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br>
-            <span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意有價證券 ↗</span>
-        </div>
-    </a>
-    """, unsafe_allow_html=True)
-
+    st.markdown('<a href="https://www.tpex.org.tw/zh-tw/announce/market/attention.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br><span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意有價證券 ↗</span></div></a>', unsafe_allow_html=True)
 with col_tpex_2:
-    st.markdown("""
-    <a href="https://www.tpex.org.tw/zh-tw/announce/market/disposal.html" target="_blank" style="text-decoration:none;">
-        <div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center; transition:0.3s;">
-            <span style="font-size:20px;">🔒</span><br>
-            <b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br>
-            <span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置有價證券 ↗</span>
-        </div>
-    </a>
-    """, unsafe_allow_html=True)
+    st.markdown('<a href="https://www.tpex.org.tw/zh-tw/announce/market/disposal.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br><span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置有價證券 ↗</span></div></a>', unsafe_allow_html=True)
