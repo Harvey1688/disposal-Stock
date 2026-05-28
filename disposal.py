@@ -126,7 +126,7 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
             is_limit_up_list.append(abs(p_curr - l_up) < 1e-4)
             is_limit_down_list.append(abs(p_curr - l_down) < 1e-4)
         
-        sum_ret_6d = sum(daily_returns)
+        sum_ret_6d = truncate_2_decimals(sum(daily_returns))
         total_spread_6d = round(sub_prices[-1] - sub_prices[0], 2)
         
         window_df = pd.DataFrame({
@@ -344,11 +344,11 @@ if stock_id:
         is_today_both_triggered = (today_sum_ret >= 25.0) and (today_total_spread >= 50.0)
         
         if is_today_both_triggered:
-            bg_color_metric = "#ef5350"  # 達標警報紅
+            bg_color_metric = "#ef5350"  
             text_color_metric = "#ffffff"
             status_label = "🔴 已雙達標發布注意門檻"
         else:
-            bg_color_metric = "#2b8a3e"  # 安全防護綠
+            bg_color_metric = "#2b8a3e"  
             text_color_metric = "#ffffff"
             status_label = "🟢 未雙達標安全綠燈"
 
@@ -483,8 +483,6 @@ if stock_id:
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # 🛠️ 【重大主要優化】：移除有礙視覺的紅綠背景條，直接將字體放大 1.2 倍、加粗！
-                # 並且全自動配對法規雙達標聯動顏色，完美靠左邊緣對齊。
                 is_sim_both_triggered = (sim_sum_ret >= 25.0) and (sim_total_spread >= 50.0)
                 color_text_metrics = "#d32f2f" if is_sim_both_triggered else "#2b8a3e"
                 icon_metrics = "🔴" if is_sim_both_triggered else "🟢"
@@ -504,6 +502,8 @@ if stock_id:
                     </div>
                     """, unsafe_allow_html=True)
                 else:
+                    is_sim_both_triggered = (sim_sum_ret >= 25.0) and (sim_total_spread >= 50.0)
+                    
                     if is_sim_both_triggered:
                         text_color_indicator = "#d32f2f"
                         ret_icon = "🔴"
@@ -515,6 +515,7 @@ if stock_id:
                         spread_icon = "🟢"
                         status_text = "未同時達標"
                     
+                    # 💡 【完美修復核心】：成功將 unsafe_allow_html=True 補回 markdown！
                     st.markdown(f"""
                     <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:12px; border-radius:5px; color:#ef5350; font-size:14px; margin-bottom:10px; line-height:1.6;'>
                         <b>🚨 控盤警告：觸發價低於漲停價</b><br>
