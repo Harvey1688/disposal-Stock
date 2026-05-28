@@ -145,7 +145,6 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     p_yesterday = prices_list[target_idx - 1] if target_idx >= 1 else p_target
     is_price_dropped_or_equal = (p_target <= p_yesterday)
 
-    # 💡 核心修正點：所有長線條款百分比全面改用 truncate_2_decimals 進行無條件捨去，完美匹配官方 218.36%！
     if target_idx >= 29:
         p_start_30d = prices_list[target_idx - 29]
         pct_30d = truncate_2_decimals((p_target - p_start_30d) / p_start_30d * 100)
@@ -342,7 +341,6 @@ if stock_id:
         
         is_today_danger, today_rules, today_exempts, today_window_df, today_sum_ret, today_total_spread = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
         
-        # 💡 【核心主要升級 1】：今日歷史截止數據看板，全面改為「雙指標同時超標才亮紅燈（紅底白字）」聯動判定！
         is_today_both_triggered = (today_sum_ret >= 25.0) and (today_total_spread >= 50.0)
         
         if is_today_both_triggered:
@@ -393,7 +391,7 @@ if stock_id:
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.markdown(f"""
+            st.markdown("""
             <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-top:15px; margin-bottom:15px; font-size:24px; font-weight:bold;'>
                 🟢 今日數學推演：未超過法規規定（安全綠燈）
             </div>
@@ -478,22 +476,25 @@ if stock_id:
             
             with cols_pool[d_idx]:
                 st.error(f"🗓 預測第 {d_idx+1} 天：{future_dates[d_idx]}")
-                
-                # 💡 【核心主要升級 2】：未來 5 天卡片上排小黃條，同步改為「雙指標同時超標才變紅燈」聯動變色！
-                is_sim_both_triggered = (sim_sum_ret >= 25.0) and (sim_total_spread >= 50.0)
-                sim_bg_color = "#ef5350" if is_sim_both_triggered else "#2b8a3e"
-                
                 st.markdown(f"""
-                <div style='background-color: #ef5350; color: white; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 5px;'>
+                <div style='background-color: #ef5350; color: white; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 12px;'>
                     <small>🔥 當天若鎖死漲停價</small><br>
                     <b style='font-size: 22px;'>{next_limit_up:.2f} 元</b>
                 </div>
+                """, unsafe_allow_html=True)
                 
-                <div style='font-size:12px; font-weight:800; color:#ffffff; background-color:{sim_bg_color}; padding:5px 8px; border-radius:3px; text-align:center; margin-bottom:10px;'>
-                    價差：{sim_total_spread:+.2f} 元 | 累積幅：{sim_sum_ret:+.2f}%
+                # 🛠️ 【重大主要優化】：移除有礙視覺的紅綠背景條，直接將字體放大 1.2 倍、加粗！
+                # 並且全自動配對法規雙達標聯動顏色，完美靠左邊緣對齊。
+                is_sim_both_triggered = (sim_sum_ret >= 25.0) and (sim_total_spread >= 50.0)
+                color_text_metrics = "#d32f2f" if is_sim_both_triggered else "#2b8a3e"
+                icon_metrics = "🔴" if is_sim_both_triggered else "🟢"
+                
+                st.markdown(f"""
+                <div style='font-size: 15px; font-weight: 800; color: {color_text_metrics}; line-height: 1.8; margin-bottom: 15px; padding-left: 2px;'>
+                    {icon_metrics} 預估起迄價差：<b>{sim_total_spread:+.2f} 元</b><br>
+                    {icon_metrics} 預估累積漲幅：<b>{sim_sum_ret:+.2f}%</b>
                 </div>
-                """, 
-                unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
                 
                 if day_trigger_price > next_limit_up:
                     st.markdown(f"""
@@ -504,20 +505,25 @@ if stock_id:
                     """, unsafe_allow_html=True)
                 else:
                     if is_sim_both_triggered:
-                        ret_badge = f"<span style='background-color:#d32f2f; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🔴 累積漲幅：{corr_sum_ret:+.2f}%</span> (已達標)"
-                        spread_badge = f"<span style='background-color:#d32f2f; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🔴 起迄價差：{corr_spread:+.2f} 元</span> (已達標)"
+                        text_color_indicator = "#d32f2f"
+                        ret_icon = "🔴"
+                        spread_icon = "🔴"
+                        status_text = "已雙雙達標"
                     else:
-                        ret_badge = f"<span style='background-color:#2b8a3e; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🟢 累積漲幅：{corr_sum_ret:+.2f}%</span> (未雙達標)"
-                        spread_badge = f"<span style='background-color:#2b8a3e; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🟢 起迄價差：{corr_spread:+.2f} 元</span> (未雙達標)"
+                        text_color_indicator = "#2b8a3e"
+                        ret_icon = "🟢"
+                        spread_icon = "🟢"
+                        status_text = "未同時達標"
                     
                     st.markdown(f"""
-                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:12px; border-radius:5px; color:#ef5350; font-size:13.5px; margin-bottom:10px; line-height:1.6;'>
+                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:12px; border-radius:5px; color:#ef5350; font-size:14px; margin-bottom:10px; line-height:1.6;'>
                         <b>🚨 控盤警告：觸發價低於漲停價</b><br>
-                        當天收盤價若高於 <span style='font-size:16px; font-weight:bold; color:#d32f2f;'>{day_trigger_price:.2f} 元</span> 即觸發注意股！<br>
-                        <div style='margin-top:8px; color:#111111; font-size:13px; line-height:1.8; background-color:#ffffff; padding:6px 10px; border-radius:4px; box-shadow:inset 0 1px 3px rgba(0,0,0,0.1);'>
-                            <b>💡 雙指標聯動判定（皆達標才發注意）：</b><br>
-                            • {ret_badge}<br>
-                            • {spread_badge}
+                        當天收盤價若高於 <span style='font-size:17px; font-weight:bold; color:#d32f2f;'>{day_trigger_price:.2f} 元</span> 即觸發注意股！
+                        
+                        <div style='margin-top:12px; font-size:15px; font-weight:bold; color:#111111; line-height:1.8;'>
+                            💡 雙指標聯動核對 ({status_text})：<br>
+                            {ret_icon} 累積漲幅：<span style='color:{text_color_indicator}; font-size:16px;'>{corr_sum_ret:+.2f}%</span><br>
+                            {spread_icon} 起迄價差：<span style='color:{text_color_indicator}; font-size:16px;'>{corr_spread:+.2f} 元</span>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
