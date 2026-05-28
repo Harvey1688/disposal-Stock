@@ -10,7 +10,7 @@ st.set_page_config(page_title="處置股/注意股 終極法規控盤羅盤", la
 
 
 def truncate_2_decimals(n):
-    """將數字無條件捨去至小數點後第二位"""
+    """將數字無條件捨去至小數點後第二位 (台股法規計算核心)"""
     if n >= 0:
         return math.floor(n * 100) / 100
     else:
@@ -67,16 +67,12 @@ def get_next_business_days(start_date_str, count=5):
 
 def find_trigger_details_for_day(base_price, sum_past_4, compare_base_price):
     """
-    🎯 核心反推引擎：精確反向推導出當天要觸發 25% 門檻與 50元門檻的各自獨立臨界價，並回傳詳細規格
+    🎯 核心反推引擎：精確反向推導出當天要觸發 25% 門檻與 50元門檻的各自獨立臨界價
     """
-    # 為了剛好跨過/觸及 50 元價差門檻，收盤價必須是：
     price_by_spread = compare_base_price + 50.0
-    
-    # 為了剛好累積漲幅總和跨過/觸及 25% 門檻，當天所需的單日漲幅：
     req_ret = 25.0 - sum_past_4
     price_by_ret = base_price * (1 + req_ret / 100.0)
     
-    # 法規是「雙指標同時成立」，因此實際觸發注意股的「最低門檻價」是兩者的最大值
     trigger_price = max(price_by_spread, price_by_ret)
     
     def apply_tick_size(p):
@@ -90,7 +86,6 @@ def find_trigger_details_for_day(base_price, sum_past_4, compare_base_price):
     
     final_trigger = apply_tick_size(trigger_price)
     
-    # 計算在該觸發價下，對位的精確法規狀態值
     corr_spread = round(final_trigger - compare_base_price, 2)
     corr_ret_day = truncate_2_decimals((final_trigger - base_price) / base_price * 100)
     corr_sum_ret = round(sum_past_4 + corr_ret_day, 2)
@@ -100,7 +95,7 @@ def find_trigger_details_for_day(base_price, sum_past_4, compare_base_price):
 
 def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     """
-    👑 智慧核心：完美校正扣抵基期與欄位資料的法規判定引擎
+    👑 智慧核心：精確進行滾動窗格扣抵與長線無條件捨去的法規判定引擎
     """
     triggered_rules = []
     exempt_reasons = [] 
@@ -150,9 +145,10 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     p_yesterday = prices_list[target_idx - 1] if target_idx >= 1 else p_target
     is_price_dropped_or_equal = (p_target <= p_yesterday)
 
+    # 💡 核心修正點：所有長線條款百分比全面改用 truncate_2_decimals 進行無條件捨去，完美匹配官方 218.36%！
     if target_idx >= 29:
         p_start_30d = prices_list[target_idx - 29]
-        pct_30d = (p_target - p_start_30d) / p_start_30d * 100
+        pct_30d = truncate_2_decimals((p_target - p_start_30d) / p_start_30d * 100)
         if abs(pct_30d) > 100.0:
             if is_price_dropped_or_equal:
                 exempt_reasons.append(f"🟢 豁免第二款(30日)：當日收盤價未高於前一日，依法直接不予公布。")
@@ -167,7 +163,7 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
 
     if target_idx >= 59:
         p_start_60d = prices_list[target_idx - 59]
-        pct_60d = (p_target - p_start_60d) / p_start_60d * 100
+        pct_60d = truncate_2_decimals((p_target - p_start_60d) / p_start_60d * 100)
         if abs(pct_60d) > 130.0:
             if is_price_dropped_or_equal:
                 exempt_reasons.append(f"🟢 豁免第二款(60日)：當日收盤價未高於前一日，依法直接不予公布。")
@@ -182,7 +178,7 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
 
     if target_idx >= 89:
         p_start_90d = prices_list[target_idx - 89]
-        pct_90d = (p_target - p_start_90d) / p_start_90d * 100
+        pct_90d = truncate_2_decimals((p_target - p_start_90d) / p_start_90d * 100)
         if abs(pct_90d) > 160.0:
             if is_price_dropped_or_equal:
                 exempt_reasons.append(f"🟢 豁免第二款(90日)：當日收盤價未高於前一日，依法直接不予公布。")
@@ -292,7 +288,7 @@ def fetch_official_announcements_all_market(stock_id, target_date_str):
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：處置股 / 注意股【極致細節完全體】")
+st.title("飯店級智慧看盤：處置股 / 注意股【真・法規匹配版】")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
@@ -339,22 +335,32 @@ if stock_id:
         today_price = all_prices[-1]
         today_date = all_dates[-1]
 
-        # 👑 最新價與高亮指標區置頂
+        # 👑 最新價指標區置頂
         col_name_header, col_price_metric = st.columns([1.8, 1.2])
         with col_name_header:
             st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
         
         is_today_danger, today_rules, today_exempts, today_window_df, today_sum_ret, today_total_spread = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
         
+        # 💡 【核心主要升級 1】：今日歷史截止數據看板，全面改為「雙指標同時超標才亮紅燈（紅底白字）」聯動判定！
+        is_today_both_triggered = (today_sum_ret >= 25.0) and (today_total_spread >= 50.0)
+        
+        if is_today_both_triggered:
+            bg_color_metric = "#ef5350"  # 達標警報紅
+            text_color_metric = "#ffffff"
+            status_label = "🔴 已雙達標發布注意門檻"
+        else:
+            bg_color_metric = "#2b8a3e"  # 安全防護綠
+            text_color_metric = "#ffffff"
+            status_label = "🟢 未雙達標安全綠燈"
+
         with col_price_metric:
             st.metric(label=f"當前最新即時/收盤價 ({today_date})", value=f"{today_price:.2f} 元")
             st.markdown(
                 f"""
-                <div style='background-color: #ffd60a; color: #000000; padding: 8px 12px; border-radius: 4px; font-weight: 900; font-size: 15px; margin-top: -5px; margin-bottom: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'>
-                    💰 六個營業日起起迄兩個營業日收盤價價差：{today_total_spread:+.2f} 元
-                </div>
-                <div style='background-color: #ffd60a; color: #000000; padding: 8px 12px; border-radius: 4px; font-weight: 900; font-size: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'>
-                    📈 六個營業日累積漲跌幅總和：{today_sum_ret:+.2f}%
+                <div style='background-color: {bg_color_metric}; color: {text_color_metric}; padding: 8px 12px; border-radius: 4px; font-weight: 900; font-size: 15px; margin-top: -5px; margin-bottom: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); text-align:center;'>
+                    {status_label}<br>
+                    <small>💰 6日收盤起迄價差：{today_total_spread:+.2f} 元 | 📈 6日累積漲跌幅：{today_sum_ret:+.2f}%</small>
                 </div>
                 """, 
                 unsafe_allow_html=True
@@ -387,7 +393,7 @@ if stock_id:
             </div>
             """, unsafe_allow_html=True)
         else:
-            st.markdown("""
+            st.markdown(f"""
             <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-top:15px; margin-bottom:15px; font-size:24px; font-weight:bold;'>
                 🟢 今日數學推演：未超過法規規定（安全綠燈）
             </div>
@@ -459,7 +465,6 @@ if stock_id:
             sum_past_4_days = sum(past_returns[:-1])
             compare_base_price = sim_prices[-5] 
             
-            # 🛠️ 提取詳細的法規邊界數值（觸發價、觸發當天的真實價差、觸發當天的累積漲幅）
             day_trigger_price, corr_spread, corr_sum_ret = find_trigger_details_for_day(current_price, sum_past_4_days, compare_base_price)
             
             sim_prices.append(next_limit_up)
@@ -473,14 +478,19 @@ if stock_id:
             
             with cols_pool[d_idx]:
                 st.error(f"🗓 預測第 {d_idx+1} 天：{future_dates[d_idx]}")
+                
+                # 💡 【核心主要升級 2】：未來 5 天卡片上排小黃條，同步改為「雙指標同時超標才變紅燈」聯動變色！
+                is_sim_both_triggered = (sim_sum_ret >= 25.0) and (sim_total_spread >= 50.0)
+                sim_bg_color = "#ef5350" if is_sim_both_triggered else "#2b8a3e"
+                
                 st.markdown(f"""
                 <div style='background-color: #ef5350; color: white; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 5px;'>
                     <small>🔥 當天若鎖死漲停價</small><br>
                     <b style='font-size: 22px;'>{next_limit_up:.2f} 元</b>
                 </div>
                 
-                <div style='font-size:12px; font-weight:800; color:#000000; background-color:#ffd60a; padding:4px 8px; border-radius:3px; text-align:center; margin-bottom:10px;'>
-                    若漲停價收盤 價差：{sim_total_spread:+.2f} 元 | 累積幅：{sim_sum_ret:+.2f}%
+                <div style='font-size:12px; font-weight:800; color:#ffffff; background-color:{sim_bg_color}; padding:5px 8px; border-radius:3px; text-align:center; margin-bottom:10px;'>
+                    價差：{sim_total_spread:+.2f} 元 | 累積幅：{sim_sum_ret:+.2f}%
                 </div>
                 """, 
                 unsafe_allow_html=True)
@@ -493,15 +503,21 @@ if stock_id:
                     </div>
                     """, unsafe_allow_html=True)
                 else:
-                    # 🛠️ 升級後的實戰警告資訊卡片：完整拆解臨界點收盤價、價差及累積漲幅
+                    if is_sim_both_triggered:
+                        ret_badge = f"<span style='background-color:#d32f2f; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🔴 累積漲幅：{corr_sum_ret:+.2f}%</span> (已達標)"
+                        spread_badge = f"<span style='background-color:#d32f2f; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🔴 起迄價差：{corr_spread:+.2f} 元</span> (已達標)"
+                    else:
+                        ret_badge = f"<span style='background-color:#2b8a3e; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🟢 累積漲幅：{corr_sum_ret:+.2f}%</span> (未雙達標)"
+                        spread_badge = f"<span style='background-color:#2b8a3e; color:white; padding:2px 6px; border-radius:3px; font-weight:bold;'>🟢 起迄價差：{corr_spread:+.2f} 元</span> (未雙達標)"
+                    
                     st.markdown(f"""
-                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:12px; border-radius:5px; color:#ef5350; font-size:13.5px; margin-bottom:10px; line-height:1.5;'>
+                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:12px; border-radius:5px; color:#ef5350; font-size:13.5px; margin-bottom:10px; line-height:1.6;'>
                         <b>🚨 控盤警告：觸發價低於漲停價</b><br>
                         當天收盤價若高於 <span style='font-size:16px; font-weight:bold; color:#d32f2f;'>{day_trigger_price:.2f} 元</span> 即觸發注意股！<br>
-                        <div style='margin-top:5px; color:#444444; font-size:12.5px; background-color:#fff3cd; padding:4px 6px; border-radius:3px;'>
-                            <b>💡 觸發時法規數值明細：</b><br>
-                            • 6日累積漲跌幅：<b>{corr_sum_ret:+.2f}%</b> (達25%門檻)<br>
-                            • 起迄收盤價價差：<b>{corr_spread:+.2f} 元</b> (達50元門檻)
+                        <div style='margin-top:8px; color:#111111; font-size:13px; line-height:1.8; background-color:#ffffff; padding:6px 10px; border-radius:4px; box-shadow:inset 0 1px 3px rgba(0,0,0,0.1);'>
+                            <b>💡 雙指標聯動判定（皆達標才發注意）：</b><br>
+                            • {ret_badge}<br>
+                            • {spread_badge}
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
