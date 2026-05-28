@@ -65,16 +65,16 @@ def get_next_business_days(start_date_str, count=5):
     return business_days
 
 
-def find_trigger_details_for_day(current_price, sum_past_5_raw, compare_base_price):
+def find_trigger_details_for_day(current_price, sum_past_5_truncated, compare_base_price):
     """
-    🎯 核心反推引擎：根據個別單日漲跌幅累積加總的定義，反推臨界收盤價
+    🎯 核心反推引擎：根據每一天「先捨去再加總」的定義，精確反推明天的最低臨界觸發價
     """
     # 1. 滿足起迄價差達 50 元的最低收盤價
     price_by_spread = compare_base_price + 50.0
     
-    # 2. 滿足 6日單日變動加總 >= 25% 的最低收盤價
-    # 公式：sum_past_5_raw + ((X - current_price) / current_price * 100) >= 25.0
-    req_this_day_ret = 25.0 - sum_past_5_raw
+    # 2. 滿足 6日累積加總 >= 25% 的最低收盤價
+    # 公式：sum_past_5_truncated + truncate_2_decimals((X - current_price) / current_price * 100) >= 25.0
+    req_this_day_ret = 25.0 - sum_past_5_truncated
     price_by_ret = current_price * (1 + req_this_day_ret / 100.0)
     
     trigger_price = max(price_by_spread, price_by_ret)
@@ -91,48 +91,48 @@ def find_trigger_details_for_day(current_price, sum_past_5_raw, compare_base_pri
     
     # 計算在該臨界價下的各法規指標
     corr_spread = round(final_trigger - compare_base_price, 2)
-    this_day_ret_raw = ((final_trigger - current_price) / current_price) * 100
-    corr_sum_ret = truncate_2_decimals(sum_past_5_raw + this_day_ret_raw)
+    this_day_ret_truncated = truncate_2_decimals(((final_trigger - current_price) / current_price) * 100)
+    corr_sum_ret = round(sum_past_5_truncated + this_day_ret_truncated, 2)
     
     return final_trigger, corr_spread, corr_sum_ret
 
 
 def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
-    """👑 智慧核心：完美符合「最近六個營業日個別漲跌幅加總」與「起迄兩個營業日價差」之引擎"""
+    """👑 智慧核心：完美對齊證交所「天天先無條件捨去、最後再加總」與「頭尾相減價差」判定引擎"""
     is_danger = False
     window_df = pd.DataFrame()
     sum_ret_6d = 0.0
     total_spread_6d = 0.0
 
     if target_idx >= 5:
-        # 👑 抓取這 6 個營業日
+        # 👑 抓取這 6 個營業日 (含當日)
         sub_prices = prices_list[target_idx - 5 : target_idx + 1] 
         sub_dates = dates_list[target_idx - 5 : target_idx + 1]
         
-        daily_returns_raw = []
         display_returns = []
         is_limit_up_list = []
         is_limit_down_list = []
         
-        # 👑 嚴格計算這 6 天的每一個營業日的單日漲跌幅 (皆與其前一天比)
+        # 👑 核心計算法：這 6 天的每一天單日幅，各自計算完立刻進行無條件捨去
         for k in range(6):
             global_idx = target_idx - 5 + k
             p_prev = prices_list[global_idx - 1]
             p_curr = prices_list[global_idx]
             
+            # 天天先算、天天先無條件捨去
             ret_raw = ((p_curr - p_prev) / p_prev) * 100
-            daily_returns_raw.append(ret_raw)
-            display_returns.append(truncate_2_decimals(ret_raw))
+            ret_truncated = truncate_2_decimals(ret_raw)
+            display_returns.append(ret_truncated)
             
             l_up = calculate_limit_up(p_prev)
             l_down = calculate_limit_down(p_prev)
             is_limit_up_list.append(abs(p_curr - l_up) < 1e-4)
             is_limit_down_list.append(abs(p_curr - l_down) < 1e-4)
         
-        # 👑 【真・法規累積漲幅】：將這 6 個單日漲幅原汁原味加總，最後才無條件捨去！
-        sum_ret_6d = truncate_2_decimals(sum(daily_returns_raw))
+        # 👑 【真・證交所公式】：把已經天天無條件捨去後的數值直接相加加總！得出 49.87%！
+        sum_ret_6d = round(sum(display_returns), 2)
         
-        # 👑 【真・法規起迄價差】：這 6 天的最後一天減去第一天
+        # 👑 【真・法規價差】：這 6 天的最後一天減去第一天 (390 - 266 = 124.00)
         total_spread_6d = round(sub_prices[-1] - sub_prices[0], 2)
         
         window_df = pd.DataFrame({
@@ -234,7 +234,7 @@ if stock_id:
         # 計算今日數據
         is_today_danger, today_window_df, today_sum_ret, today_total_spread = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
 
-        # 大標題大字直接放大呈現
+        # 大標題直接呈現
         col_name_header, col_price_metric = st.columns([1.6, 1.4])
         with col_name_header:
             st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
@@ -244,7 +244,7 @@ if stock_id:
             else:
                 st.title(f"🟢 :green[綠燈：今日收盤數據未達注意股標準（安全）]")
                 
-            # 👑 【神準對齊！】：今日累積幅差回歸「單日漲幅加總法」，完美嚙合證交所！
+            # 👑 【49.87% 完美對齊！】：今日累積幅差回歸最正統的證交所算法！
             st.subheader(f"💰 今日6日收盤價起迄價差: {today_total_spread:+.2f} 元  |  📈 今日6日累積漲跌幅: {today_sum_ret:+.2f}%")
         
         with col_price_metric:
@@ -259,7 +259,7 @@ if stock_id:
             render_styled_dataframe(today_window_df)
 
         if is_today_danger:
-            st.error(f"🚨 今日數據已同時達標：最近6日個別漲跌幅累積加總 {today_sum_ret:.2f}% (門檻≧25%) 且 起迄價差 {today_total_spread:.2f}元 (門檻≧50元)。")
+            st.error(f"🚨 今日數據已同時達標：最近6日個別漲跌幅先捨去後加總 {today_sum_ret:.2f}% (門檻≧25%) 且 起迄價差 {today_total_spread:.2f}元 (門檻≧50元)。")
         else:
             st.success(f"🟢 今日數據安全：未同時達到 6日累積25% 與 50元 的雙重列管紅線。")
 
@@ -281,20 +281,20 @@ if stock_id:
         for d_idx in range(5):
             next_limit_up = calculate_limit_up(current_price)
             
-            # 🔮 計算過去 5 天定案的單日真實漲跌幅總和 (不捨去)，用作反推明天的核心
-            past_returns_raw = []
+            # 🔮 未來預測滾動 6 天：計算過去 5 天已經定案、且天天進行無條件捨去後的單日幅總和
+            past_returns_truncated = []
             for m in range(5):
                 ref_idx = len(sim_prices) - 5 + m
                 p_prev_temp = sim_prices[ref_idx - 1]
                 p_curr_temp = sim_prices[ref_idx]
-                past_returns_raw.append(((p_curr_temp - p_prev_temp) / p_prev_temp) * 100)
-            sum_past_5_raw = sum(past_returns_raw)
+                past_returns_truncated.append(truncate_2_decimals(((p_curr_temp - p_prev_temp) / p_prev_temp) * 100))
+            sum_past_5_truncated = sum(past_returns_truncated)
             
-            # 6 日窗格的第一天收盤價
+            # 滾動 6 日窗格的第一天收盤價，作價差反推基期
             compare_base_price = sim_prices[-5] 
             
-            # 呼叫純粹單日加總型反推引擎
-            day_trigger_price, corr_spread, corr_sum_ret = find_trigger_details_for_day(current_price, sum_past_5_raw, compare_base_price)
+            # 呼叫「天天捨去、最後加總型」反推核心
+            day_trigger_price, corr_spread, corr_sum_ret = find_trigger_details_for_day(current_price, sum_past_5_truncated, compare_base_price)
             
             sim_prices.append(next_limit_up)
             raw_date_label = future_dates[d_idx].split(" ")[0]
