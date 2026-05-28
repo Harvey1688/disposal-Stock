@@ -6,7 +6,7 @@ import streamlit as st
 import yfinance as yf
 
 # 設定網頁標題與風格
-st.set_page_config(page_title="純粹法規注意股監控盤", layout="wide")
+st.set_page_config(page_title="法規注意股監控盤", layout="wide")
 
 
 def truncate_2_decimals(n):
@@ -186,7 +186,7 @@ def render_styled_dataframe(display_df):
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：純粹法規注意股計算面板")
+st.title("純粹法規注意股計算")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
