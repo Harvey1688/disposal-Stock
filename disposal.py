@@ -46,7 +46,7 @@ def calculate_limit_down(price):
 
 
 def get_next_business_days(start_date_str, count=5):
-    """115年市場開休市交易行事曆智慧過祿"""
+    """115年市場開休市交易行事曆智慧過濾"""
     twse_holidays = {
         "2026-01-01", "2026-02-12", "2026-02-13", "2026-02-16", "2026-02-17", 
         "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-27", "2026-04-03", 
@@ -65,25 +65,37 @@ def get_next_business_days(start_date_str, count=5):
     return business_days
 
 
-def find_trigger_price_for_day(base_price, sum_past_4, compare_base_price):
+def find_trigger_details_for_day(base_price, sum_past_4, compare_base_price):
     """
-    🎯 核心反推引擎：精確反向推導出當天要觸發 25% 門檻的最低臨界價位
+    🎯 核心反推引擎：精確反向推導出當天要觸發 25% 門檻與 50元門檻的各自獨立臨界價，並回傳詳細規格
     """
+    # 為了剛好跨過/觸及 50 元價差門檻，收盤價必須是：
     price_by_spread = compare_base_price + 50.0
+    
+    # 為了剛好累積漲幅總和跨過/觸及 25% 門檻，當天所需的單日漲幅：
     req_ret = 25.0 - sum_past_4
     price_by_ret = base_price * (1 + req_ret / 100.0)
     
+    # 法規是「雙指標同時成立」，因此實際觸發注意股的「最低門檻價」是兩者的最大值
     trigger_price = max(price_by_spread, price_by_ret)
     
-    if trigger_price < 10: tick = 0.01
-    elif trigger_price < 50: tick = 0.05
-    elif trigger_price < 100: tick = 0.1
-    elif trigger_price < 500: tick = 0.5
-    elif trigger_price < 1000: tick = 1.0
-    else: tick = 5.0
+    def apply_tick_size(p):
+        if p < 10: tick = 0.01
+        elif p < 50: tick = 0.05
+        elif p < 100: tick = 0.1
+        elif p < 500: tick = 0.5
+        elif p < 1000: tick = 1.0
+        else: tick = 5.0
+        return round(math.ceil(p / tick) * tick, 2)
     
-    final_trigger = math.ceil(trigger_price / tick) * tick
-    return round(final_trigger, 2)
+    final_trigger = apply_tick_size(trigger_price)
+    
+    # 計算在該觸發價下，對位的精確法規狀態值
+    corr_spread = round(final_trigger - compare_base_price, 2)
+    corr_ret_day = truncate_2_decimals((final_trigger - base_price) / base_price * 100)
+    corr_sum_ret = round(sum_past_4 + corr_ret_day, 2)
+    
+    return final_trigger, corr_spread, corr_sum_ret
 
 
 def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
@@ -98,20 +110,17 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     sum_ret_6d = 0.0
     total_spread_6d = 0.0
 
-    # 💡 為了讓第一天也能跟前一天比，target_idx 必須 >= 6 (也就是至少要有 7 天的資料)
     if target_idx >= 6:
-        # 抓取這 6 天以及「這6天前一個營業日（基期日）」的數據
-        sub_prices = prices_list[target_idx - 6 : target_idx + 1] # 長度為 7
+        sub_prices = prices_list[target_idx - 6 : target_idx + 1] 
         sub_dates = dates_list[target_idx - 6 : target_idx + 1]
         
-        display_dates = sub_dates[1:] # 實際顯示的 6 天日期
-        display_prices = sub_prices[1:] # 實際顯示的 6 天收盤價
+        display_dates = sub_dates[1:] 
+        display_prices = sub_prices[1:] 
         
         daily_returns = []
         is_limit_up_list = []
         is_limit_down_list = []
         
-        # 💡 5/21 再也不是 0！ 每一天都是真正去跟「前一個營業日」做比較計算
         for k in range(6):
             p_prev = sub_prices[k]
             p_curr = sub_prices[k + 1]
@@ -123,10 +132,8 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
             is_limit_down_list.append(abs(p_curr - l_down) < 1e-4)
         
         sum_ret_6d = sum(daily_returns)
-        # 💡 六個營業日起迄兩個營業日收盤價價差 = 這 6 天的最後一天減去這 6 天的第一天的前一天
         total_spread_6d = round(sub_prices[-1] - sub_prices[0], 2)
         
-        # 🛠️ 正名為「當日漲跌幅」
         window_df = pd.DataFrame({
             "營業日": display_dates,
             "收盤價 (元)": display_prices,
@@ -135,16 +142,10 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
             "is_limit_down": is_limit_down_list
         })
 
-        # ----------------------------------------------------
-        # 【第一款檢查 (短線 6日)】
-        # ----------------------------------------------------
-        if sum_ret_6d >= 25.0:
-            triggered_rules.append(f"第一款 (6日累積漲幅達 {sum_ret_6d:.2f}%)")
+        if sum_ret_6d >= 25.0 and total_spread_6d >= 50.0:
+            triggered_rules.append(f"第一款 (6日累積漲幅達 {sum_ret_6d:.2f}% 且 累積價差達 {total_spread_6d:.2f}元)")
             is_danger = True
 
-    # ----------------------------------------------------
-    # 【第二款檢查：長線歷史基期異常 (30日 / 60日 / 90日)】
-    # ----------------------------------------------------
     p_target = prices_list[target_idx]
     p_yesterday = prices_list[target_idx - 1] if target_idx >= 1 else p_target
     is_price_dropped_or_equal = (p_target <= p_yesterday)
@@ -152,7 +153,6 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
     if target_idx >= 29:
         p_start_30d = prices_list[target_idx - 29]
         pct_30d = (p_target - p_start_30d) / p_start_30d * 100
-        
         if abs(pct_30d) > 100.0:
             if is_price_dropped_or_equal:
                 exempt_reasons.append(f"🟢 豁免第二款(30日)：當日收盤價未高於前一日，依法直接不予公布。")
@@ -251,7 +251,7 @@ def render_styled_dataframe(display_df):
 
 
 def fetch_official_announcements_all_market(stock_id, target_date_str):
-    """🏛    聯網比對上市與上櫃官方公告 API"""
+    """🏛  聯網比對上市與上櫃官方公告 API"""
     api_date = target_date_str.replace("-", "")
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
     notice_status, punish_status = "無", "無"
@@ -292,8 +292,7 @@ def fetch_official_announcements_all_market(stock_id, target_date_str):
 # ==========================================
 # 👑 主要畫面呈現
 # ==========================================
-st.title("飯店級智慧看盤：處置股 / 注意股【排外優化完全體】")
-st.write("已整合長短線法規、三大豁免過濾器、6日數據展開、收盤漲跌停著色、以及過去 1 個月注意條款累計追蹤與10天期處置限制！")
+st.title("飯店級智慧看盤：處置股 / 注意股【極致細節完全體】")
 st.markdown("---")
 
 stock_id = st.text_input("請輸入台股代號", value="").strip()
@@ -340,15 +339,74 @@ if stock_id:
         today_price = all_prices[-1]
         today_date = all_dates[-1]
 
-        # 👑 最新價置頂與排版調整
-        col_name_header, col_price_metric = st.columns([2, 1])
+        # 👑 最新價與高亮指標區置頂
+        col_name_header, col_price_metric = st.columns([1.8, 1.2])
         with col_name_header:
             st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
+        
+        is_today_danger, today_rules, today_exempts, today_window_df, today_sum_ret, today_total_spread = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
+        
         with col_price_metric:
             st.metric(label=f"當前最新即時/收盤價 ({today_date})", value=f"{today_price:.2f} 元")
+            st.markdown(
+                f"""
+                <div style='background-color: #ffd60a; color: #000000; padding: 8px 12px; border-radius: 4px; font-weight: 900; font-size: 15px; margin-top: -5px; margin-bottom: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'>
+                    💰 六個營業日起起迄兩個營業日收盤價價差：{today_total_spread:+.2f} 元
+                </div>
+                <div style='background-color: #ffd60a; color: #000000; padding: 8px 12px; border-radius: 4px; font-weight: 900; font-size: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);'>
+                    📈 六個營業日累積漲跌幅總和：{today_sum_ret:+.2f}%
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
 
         # ==========================================
-        # 📊 歷史【過去 1 個月】注意條款追蹤
+        # 🥇 【優先順位 1】：當天收盤狀況與狀態診斷
+        # ==========================================
+        st.markdown("---")
+        st.subheader(f"🏛 證交所注意條款歷史狀態診斷 ({today_date} 截止)")
+        
+        if not today_window_df.empty:
+            st.markdown("##### 📊 截止今日（含當天）之 6 個營業日收盤價與當日漲跌幅明細：")
+            render_styled_dataframe(today_window_df)
+
+        if today_exempts:
+            for ex in today_exempts: st.info(ex)
+
+        if is_today_danger:
+            st.markdown(f"""
+            <div style='background-color:#fce8e6; border-left:6px solid #ef5350; padding:15px; border-radius:5px; color:#ef5350; margin-top:15px; margin-bottom:15px;'>
+                <span style='font-size:24px; font-weight:bold;'>🔴 今日數學推演：已進入法規監控紅線區！</span><br>
+                <div style='margin-top:5px; font-size:14px; color:#333333; font-weight:bold;'>
+                    • 累積漲跌幅總和：<span style='color:#ef5350;'>{today_sum_ret:.2f}%</span> (超過 25% 門檻)<br>
+                    • 起迄收盤價價差：<span style='color:#ef5350;'>{today_total_spread:.2f} 元</span> (超過 50 元門檻)
+                </div>
+                <ul style='margin-top:10px; font-size:15px; color:#111111; font-weight:500;'>
+                    {"".join([f"<li style='margin-bottom:5px;'>觸發 {r}</li>" for r in today_rules])}
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-top:15px; margin-bottom:15px; font-size:24px; font-weight:bold;'>
+                🟢 今日數學推演：未超過法規規定（安全綠燈）
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("#### 🏛️ 官方本日最新公布名單即時同步狀態：")
+        with st.spinner("正在聯網校對證交所與櫃買中心最新定案公告..."):
+            off_notice, off_punish = fetch_official_announcements_all_market(stock_id, today_date)
+            
+        c1, c2 = st.columns(2)
+        with c1:
+            if "🔴" in off_notice: st.error(off_notice)
+            else: st.success(f"🟢 官方注意股狀態：{off_notice} (安全)")
+        with c2:
+            if "🍇" in off_punish: st.error(off_punish)
+            else: st.success(f"🟢 官方處置股狀態：{off_punish} (安全)")
+
+        # ==========================================
+        # 🥈 【優先順位 2】：過去一個月歷史追蹤明細
         # ==========================================
         st.markdown("---")
         st.subheader(f"📅 過去 1 個月（歷史回溯）發布交易資訊注意條款追蹤明細")
@@ -372,57 +430,6 @@ if stock_id:
             st.success("🟢 安全：該股過去 1 個月內在數學推演上未觸及 any 注意股條款。")
 
         # ==========================================
-        # 📊 今日即時明細與紅綠燈
-        # ==========================================
-        st.markdown("---")
-        st.subheader(f"🏛 證交所注意條款歷史狀態診斷 ({today_date} 截止)")
-        is_today_danger, today_rules, today_exempts, today_window_df, today_sum_ret, today_total_spread = diagnose_all_regulatory_天書(all_prices, all_dates, len(all_prices) - 1)
-        
-        # 🛠️ 調整價差位置：將累積價差緊緊貼在收盤價下方
-        if not today_window_df.empty:
-            st.markdown("##### 📊 截止今日（含當天）之 6 個營業日收盤價與當日漲跌幅明細：")
-            with col_price_metric:
-                st.markdown(f"<div style='font-size:14px; color:#666666; margin-top:-10px;'>💰 六個營業日起迄兩個營業日收盤價價差：<b>{today_total_spread:+.2f} 元</b></div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size:14px; color:#666666;'>📈 六個營業日累積漲跌幅總和：<b>{today_sum_ret:+.2f}%</b></div>", unsafe_allow_html=True)
-            
-            render_styled_dataframe(today_window_df)
-
-        if today_exempts:
-            for ex in today_exempts: st.info(ex)
-
-        if is_today_danger:
-            st.markdown(f"""
-            <div style='background-color:#fce8e6; border-left:6px solid #ef5350; padding:15px; border-radius:5px; color:#ef5350; margin-top:15px; margin-bottom:15px;'>
-                <span style='font-size:24px; font-weight:bold;'>🔴 今日數學推演：已進入法規監控紅線區！</span><br>
-                <div style='margin-top:5px; font-size:14px; color:#333333;'>
-                    • 累積漲跌幅總和：<b>{today_sum_ret:.2f}%</b> (超過25%門檻)<br>
-                    • 起迄收盤價價差：<b>{today_total_spread:.2f} 元</b>
-                </div>
-                <ul style='margin-top:10px; font-size:15px; color:#111111; font-weight:500;'>
-                    {"".join([f"<li style='margin-bottom:5px;'>觸發 {r}</li>" for r in today_rules])}
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div style='background-color:#e2f0d9; border-left:6px solid #2b8a3e; padding:15px; border-radius:5px; color:#2b8a3e; margin-top:15px; margin-bottom:15px; font-size:24px; font-weight:bold;'>
-                🟢 今日數學推演：未超過法規規定（安全綠燈）
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("#### 🏛️ 官方本日最新公布名單即時同步狀態：")
-        with st.spinner("正在聯網校對證交所與櫃買中心最新定案公告..."):
-            off_notice, off_punish = fetch_official_announcements_all_market(stock_id, today_date)
-            
-        c1, c2 = st.columns(2)
-        with c1:
-            if "🔴" in off_notice: st.error(off_notice)
-            else: st.success(f"🟢 官方注意股狀態：{off_notice} (安全)")
-        with c2:
-            if "🍇" in off_punish: st.error(off_punish)
-            else: st.success(f"🟢 官方處置股狀態：{off_punish} (安全)")
-
-        # ==========================================
         # 🔮 未來一整週天天漲停與臨界觸發價推演
         # ==========================================
         st.markdown("---")
@@ -442,8 +449,6 @@ if stock_id:
         for d_idx in range(5):
             next_limit_up = calculate_limit_up(current_price)
             
-            # 智慧提取前五天的實際收盤（不含漲停當天），反推觸發價
-            # 為了符合 6 日扣抵，我們需要拿到前 4 天每天的單日變動率
             past_returns = []
             for m in range(4):
                 pf_idx = len(sim_prices) - 4 + m
@@ -452,9 +457,10 @@ if stock_id:
                 past_returns.append(truncate_2_decimals((p_to_temp - p_from_temp) / p_from_temp * 100))
             
             sum_past_4_days = sum(past_returns[:-1])
-            compare_base_price = sim_prices[-5] # 拿前一天的第 -5 天當作基期對照日
+            compare_base_price = sim_prices[-5] 
             
-            day_trigger_price = find_trigger_price_for_day(current_price, sum_past_4_days, compare_base_price)
+            # 🛠️ 提取詳細的法規邊界數值（觸發價、觸發當天的真實價差、觸發當天的累積漲幅）
+            day_trigger_price, corr_spread, corr_sum_ret = find_trigger_details_for_day(current_price, sum_past_4_days, compare_base_price)
             
             sim_prices.append(next_limit_up)
             raw_date_label = future_dates[d_idx].split(" ")[0]
@@ -469,26 +475,34 @@ if stock_id:
                 st.error(f"🗓 預測第 {d_idx+1} 天：{future_dates[d_idx]}")
                 st.markdown(f"""
                 <div style='background-color: #ef5350; color: white; padding: 10px; border-radius: 5px; text-align: center; margin-bottom: 5px;'>
-                    <small>🔥 當天法定預估漲停價</small><br>
+                    <small>🔥 當天若鎖死漲停價</small><br>
                     <b style='font-size: 22px;'>{next_limit_up:.2f} 元</b>
                 </div>
-                <div style='font-size:13px; color:#555555; text-align:center; margin-bottom:10px;'>
-                    價差：<b>{sim_total_spread:+.2f} 元</b> | 累積漲跌幅：<b>{sim_sum_ret:+.2f}%</b>
+                
+                <div style='font-size:12px; font-weight:800; color:#000000; background-color:#ffd60a; padding:4px 8px; border-radius:3px; text-align:center; margin-bottom:10px;'>
+                    若漲停價收盤 價差：{sim_total_spread:+.2f} 元 | 累積幅：{sim_sum_ret:+.2f}%
                 </div>
-                """, unsafe_allow_html=True)
+                """, 
+                unsafe_allow_html=True)
                 
                 if day_trigger_price > next_limit_up:
                     st.markdown(f"""
                     <div style='background-color:#e2f0d9; border-left:4px solid #2b8a3e; padding:10px; border-radius:5px; color:#2b8a3e; font-size:14px; margin-bottom:10px;'>
                         <b>✅ 安全窗期：當天漲停也安全</b><br>
-                        觸發價為 {day_trigger_price:.2f} 元，高於漲停價。當天鎖死也不會被注意！
+                        觸發臨界價為 {day_trigger_price:.2f} 元，高於最高漲停價。當天鎖死也不會被發注意。
                     </div>
                     """, unsafe_allow_html=True)
                 else:
+                    # 🛠️ 升級後的實戰警告資訊卡片：完整拆解臨界點收盤價、價差及累積漲幅
                     st.markdown(f"""
-                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:10px; border-radius:5px; color:#ef5350; font-size:14px; margin-bottom:10px;'>
+                    <div style='background-color:#fce8e6; border-left:4px solid #ef5350; padding:12px; border-radius:5px; color:#ef5350; font-size:13.5px; margin-bottom:10px; line-height:1.5;'>
                         <b>🚨 控盤警告：觸發價低於漲停價</b><br>
-                        收盤若高於 <span style='font-size:16px; font-weight:bold;'>{day_trigger_price:.2f}</span> 元即觸發注意！當天尾盤必須壓在此價位下。
+                        當天收盤價若高於 <span style='font-size:16px; font-weight:bold; color:#d32f2f;'>{day_trigger_price:.2f} 元</span> 即觸發注意股！<br>
+                        <div style='margin-top:5px; color:#444444; font-size:12.5px; background-color:#fff3cd; padding:4px 6px; border-radius:3px;'>
+                            <b>💡 觸發時法規數值明細：</b><br>
+                            • 6日累積漲跌幅：<b>{corr_sum_ret:+.2f}%</b> (達25%門檻)<br>
+                            • 起迄收盤價價差：<b>{corr_spread:+.2f} 元</b> (達50元門檻)
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -505,6 +519,8 @@ if stock_id:
         # ==========================================
         st.markdown("---")
         st.subheader("🍇 未來一週【處置股判定與撮合限制】預警看板")
+        
+        total_accumulated_notices = len(past_month_notices) + notice_days_count
         
         if notice_days_count >= 3 or total_accumulated_notices >= 5:
             is_second_time_disposal = (stock_id == "2492") or (total_accumulated_notices >= 8)
@@ -526,3 +542,18 @@ if stock_id:
                 <b>✅ 處置安全邊界內：</b> 未來 5 天内模擬之累積注意天數尚未跨過強制處置紅線，目前籌碼處於主力可控之安全區間。
             </div>
             """, unsafe_allow_html=True)
+else:
+    st.info("💡 請在上方輸入框鍵入台股代號（例如：2492 華新科 或 3030 德律），系統將立即為您解開完整法規天書推演。")
+
+# 官方傳送門保持底部
+st.markdown("---")
+st.markdown("### 🏛️ 證交所 / 櫃買中心 官方公告核對傳送門")
+col_twse_1, col_twse_2, col_tpex_1, col_tpex_2 = st.columns(4)
+with col_twse_1:
+    st.markdown('<a href="https://www.twse.com.tw/zh/announcement/notice.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br><span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意股票公告 ↗</span></div></a>', unsafe_allow_html=True)
+with col_twse_2:
+    st.markdown('<a href="https://www.twse.com.tw/zh/announcement/punish.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">臺灣證交所 (上市)</b><br><span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置股票公告 ↗</span></div></a>', unsafe_allow_html=True)
+with col_tpex_1:
+    st.markdown('<a href="https://www.tpex.org.tw/zh-tw/announce/market/attention.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #0288d1; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br><span style="color:#0288d1; font-size:13px; font-weight:bold;">每日注意有價證券 ↗</span></div></a>', unsafe_allow_html=True)
+with col_tpex_2:
+    st.markdown('<a href="https://www.tpex.org.tw/zh-tw/announce/market/disposal.html" target="_blank" style="text-decoration:none;"><div style="background-color:#f1f3f5; padding:15px; border-radius:8px; border-left:5px solid #d32f2f; text-align:center;"><b style="color:#1a1a1a; font-size:15px;">櫃買中心 (上櫃)</b><br><span style="color:#d32f2f; font-size:13px; font-weight:bold;">每日處置有價證券 ↗</span></div></a>', unsafe_allow_html=True)
