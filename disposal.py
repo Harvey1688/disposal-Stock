@@ -66,14 +66,8 @@ def get_next_business_days(start_date_str, count=5):
 
 
 def find_trigger_details_for_day(current_price, sum_past_5_truncated, compare_base_price):
-    """
-    🎯 核心反推引擎：根據每一天「先捨去再加總」的定義，精確反推明天的最低臨界觸發價
-    """
-    # 1. 滿足起迄價差達 50 元的最低收盤價
+    """🎯 核心反推引擎：根據天天「先捨去再加總」定義，反推明天的臨界觸發收盤價"""
     price_by_spread = compare_base_price + 50.0
-    
-    # 2. 滿足 6日累積加總 >= 25% 的最低收盤價
-    # 公式：sum_past_5_truncated + truncate_2_decimals((X - current_price) / current_price * 100) >= 25.0
     req_this_day_ret = 25.0 - sum_past_5_truncated
     price_by_ret = current_price * (1 + req_this_day_ret / 100.0)
     
@@ -89,7 +83,6 @@ def find_trigger_details_for_day(current_price, sum_past_5_truncated, compare_ba
     final_trigger = math.ceil(trigger_price / tick) * tick
     final_trigger = round(final_trigger, 2)
     
-    # 計算在該臨界價下的各法規指標
     corr_spread = round(final_trigger - compare_base_price, 2)
     this_day_ret_truncated = truncate_2_decimals(((final_trigger - current_price) / current_price) * 100)
     corr_sum_ret = round(sum_past_5_truncated + this_day_ret_truncated, 2)
@@ -98,14 +91,13 @@ def find_trigger_details_for_day(current_price, sum_past_5_truncated, compare_ba
 
 
 def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
-    """👑 智慧核心：完美對齊證交所「天天先無條件捨去、最後再加總」與「頭尾相減價差」判定引擎"""
+    """👑 智慧核心：證交所標準「天天先無條件捨去、最後再加總」與「頭尾相減價差」判定引擎"""
     is_danger = False
     window_df = pd.DataFrame()
     sum_ret_6d = 0.0
     total_spread_6d = 0.0
 
     if target_idx >= 5:
-        # 👑 抓取這 6 個營業日 (含當日)
         sub_prices = prices_list[target_idx - 5 : target_idx + 1] 
         sub_dates = dates_list[target_idx - 5 : target_idx + 1]
         
@@ -113,13 +105,12 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
         is_limit_up_list = []
         is_limit_down_list = []
         
-        # 👑 核心計算法：這 6 天的每一天單日幅，各自計算完立刻進行無條件捨去
         for k in range(6):
             global_idx = target_idx - 5 + k
             p_prev = prices_list[global_idx - 1]
             p_curr = prices_list[global_idx]
             
-            # 天天先算、天天先無條件捨去
+            # 核心法規：天天計算、天天各自先做無條件捨去至第二位
             ret_raw = ((p_curr - p_prev) / p_prev) * 100
             ret_truncated = truncate_2_decimals(ret_raw)
             display_returns.append(ret_truncated)
@@ -129,10 +120,8 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
             is_limit_up_list.append(abs(p_curr - l_up) < 1e-4)
             is_limit_down_list.append(abs(p_curr - l_down) < 1e-4)
         
-        # 👑 【真・證交所公式】：把已經天天無條件捨去後的數值直接相加加總！得出 49.87%！
+        # 捨去後的數值直接相加總，完美吻合 49.87%
         sum_ret_6d = round(sum(display_returns), 2)
-        
-        # 👑 【真・法規價差】：這 6 天的最後一天減去第一天 (390 - 266 = 124.00)
         total_spread_6d = round(sub_prices[-1] - sub_prices[0], 2)
         
         window_df = pd.DataFrame({
@@ -202,7 +191,7 @@ if stock_id:
         ticker_symbol = f"{stock_id}.TW"
         try:
             stock = yf.Ticker(ticker_symbol)
-            df = stock.history(period="6mo", auto_adjust=False)
+            df = stock.history(period="1y", auto_adjust=False) # 放大範圍至1年以支援完整歷史回測
         except:
             df = fetch_backup_stock_history_from_twse(stock_id)
 
@@ -238,13 +227,10 @@ if stock_id:
         col_name_header, col_price_metric = st.columns([1.6, 1.4])
         with col_name_header:
             st.header(f"🔍 當前查詢：{stock_name} ({stock_id})")
-            
             if is_today_danger:
                 st.title(f"🔴 :red[紅燈：今日收盤價已觸動法規注意股門檻！]")
             else:
                 st.title(f"🟢 :green[綠燈：今日收盤數據未達注意股標準（安全）]")
-                
-            # 👑 【49.87% 完美對齊！】：今日累積幅差回歸最正統的證交所算法！
             st.subheader(f"💰 今日6日收盤價起迄價差: {today_total_spread:+.2f} 元  |  📈 今日6日累積漲跌幅: {today_sum_ret:+.2f}%")
         
         with col_price_metric:
@@ -257,11 +243,6 @@ if stock_id:
         st.subheader(f"📊 截止今日（含當天）之 6 個營業日收盤價與當日漲跌幅明細：")
         if not today_window_df.empty:
             render_styled_dataframe(today_window_df)
-
-        if is_today_danger:
-            st.error(f"🚨 今日數據已同時達標：最近6日個別漲跌幅先捨去後加總 {today_sum_ret:.2f}% (門檻≧25%) 且 起迄價差 {today_total_spread:.2f}元 (門檻≧50元)。")
-        else:
-            st.success(f"🟢 今日數據安全：未同時達到 6日累積25% 與 50元 的雙重列管紅線。")
 
         # ==========================================
         # 🔮 【區塊二】：未來一整週天天漲停與臨界觸發價推演
@@ -281,7 +262,6 @@ if stock_id:
         for d_idx in range(5):
             next_limit_up = calculate_limit_up(current_price)
             
-            # 🔮 未來預測滾動 6 天：計算過去 5 天已經定案、且天天進行無條件捨去後的單日幅總和
             past_returns_truncated = []
             for m in range(5):
                 ref_idx = len(sim_prices) - 5 + m
@@ -290,10 +270,8 @@ if stock_id:
                 past_returns_truncated.append(truncate_2_decimals(((p_curr_temp - p_prev_temp) / p_prev_temp) * 100))
             sum_past_5_truncated = sum(past_returns_truncated)
             
-            # 滾動 6 日窗格的第一天收盤價，作價差反推基期
             compare_base_price = sim_prices[-5] 
             
-            # 呼叫「天天捨去、最後加總型」反推核心
             day_trigger_price, corr_spread, corr_sum_ret = find_trigger_details_for_day(current_price, sum_past_5_truncated, compare_base_price)
             
             sim_prices.append(next_limit_up)
@@ -328,6 +306,40 @@ if stock_id:
                         st.markdown(f"🟢 起迄價差：:green[{corr_spread:+.2f} 元] (未雙達標)")
                     
             current_price = next_limit_up
+
+        # ==========================================
+        # 🎖️ 【區塊三】：回歸歷史 30 / 60 / 90 天回測診斷
+        # ==========================================
+        st.markdown("---")
+        st.subheader("🎖️ 歷史回測回歸：過去 30 / 60 / 90 個營業日之注意股觸發歷史明細")
+        
+        tab30, tab60, tab90 = st.tabs(["📅 過去 30 個營業日", "📅 過去 60 個營業日", "📅 過去 90 個營業日"])
+        
+        for tab_period, days_count in [(tab30, 30), (tab60, 60), (tab90, 90)]:
+            with tab_period:
+                total_len = len(all_prices)
+                start_backtest_idx = max(5, total_len - days_count)
+                
+                history_trigger_records = []
+                
+                for idx in range(start_backtest_idx, total_len):
+                    is_hist_danger, _, hist_sum_ret, hist_total_spread = diagnose_all_regulatory_天書(all_prices, all_dates, idx)
+                    if is_hist_danger:
+                        history_trigger_records.append({
+                            "觸發營業日": all_dates[idx],
+                            "當日收盤價 (元)": f"{all_prices[idx]:.2f}",
+                            "6日累積相加漲幅": f"{hist_sum_ret:+.2f}%",
+                            "6日頭尾起迄價差": f"{hist_total_spread:+.2f} 元",
+                            "法規判定結果": "🔴 觸發注意股"
+                        })
+                
+                if history_trigger_records:
+                    hist_df = pd.DataFrame(history_trigger_records)
+                    st.dataframe(hist_df, use_container_width=True, hide_index=True)
+                    st.error(f"🚨 在過去 {days_count} 個營業日內，此個股總共觸發了 **{len(history_trigger_records)}** 次注意股列管標準。")
+                else:
+                    st.success(f"🟢 恭喜！過去 {days_count} 個營業日內，該股皆無任何觸發注意股的歷史紀錄（全數安全）。")
+
 else:
     st.info("💡 請在上方輸入框鍵入台股代號（例如：2492 華新科），系統將立即為您進行法規觸動推演。")
 
