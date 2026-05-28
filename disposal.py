@@ -66,8 +66,8 @@ def get_next_business_days(start_date_str, count=5):
 
 
 def find_trigger_details_for_day(base_price, sum_past_4, compare_base_price):
-    """🎯 核心反推引擎：精確反向推導出當天臨界價"""
-    # 臨界價差：基期日價格 + 50元
+    """🎯 核心反推引擎：根據 6 日頭尾定義精確反推臨界價"""
+    # 價差臨界點：這 6 天的第一天價格 + 50元
     price_by_spread = compare_base_price + 50.0
     req_ret = 25.0 - sum_past_4
     price_by_ret = base_price * (1 + req_ret / 100.0)
@@ -93,27 +93,27 @@ def find_trigger_details_for_day(base_price, sum_past_4, compare_base_price):
 
 
 def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
-    """👑 智慧核心：滾動窗格扣抵與法規數據計算"""
+    """👑 智慧核心：完美符合「最近六個營業日起訖兩個營業日」之法規判定引擎"""
     is_danger = False
     window_df = pd.DataFrame()
     sum_ret_6d = 0.0
     total_spread_6d = 0.0
 
-    if target_idx >= 6:
-        # 👑 嚴格鎖定：取目前目標日算起共 7 筆資料（包含基期日本身）
-        sub_prices = prices_list[target_idx - 6 : target_idx + 1] 
-        sub_dates = dates_list[target_idx - 6 : target_idx + 1]
+    if target_idx >= 5:
+        # 👑 嚴格抓取這 6 個營業日 (包含當日)
+        sub_prices = prices_list[target_idx - 5 : target_idx + 1] 
+        sub_dates = dates_list[target_idx - 5 : target_idx + 1]
         
-        display_dates = sub_dates[1:] 
-        display_prices = sub_prices[1:] 
+        daily_returns = [0.0]  # 第一天做為視窗起點
+        is_limit_up_list = [False]
+        is_limit_down_list = [False]
         
-        daily_returns = []
-        is_limit_up_list = []
-        is_limit_down_list = []
-        
-        for k in range(6):
-            p_prev = sub_prices[k]
-            p_curr = sub_prices[k + 1]
+        # 計算這 6 天窗格內的每日漲跌幅 (皆與各自前一日比)
+        for k in range(5):
+            # 為了得到正確的單日漲跌幅，我們從總歷史清單中找前一日比對
+            global_idx = target_idx - 5 + k
+            p_prev = prices_list[global_idx]
+            p_curr = prices_list[global_idx + 1]
             daily_returns.append(truncate_2_decimals((p_curr - p_prev) / p_prev * 100))
             
             l_up = calculate_limit_up(p_prev)
@@ -123,19 +123,20 @@ def diagnose_all_regulatory_天書(prices_list, dates_list, target_idx):
         
         sum_ret_6d = truncate_2_decimals(sum(daily_returns))
         
-        # 👑 硬核精確扣抵：最後一天（當日）收盤價，直接減去 sub_prices[0]（基期日5/21的266元）
-        # 390 - 266 = 124.00 元！絕無誤差！
+        # 👑 【真・法規價差修復】：最近六個營業日起訖兩個營業日收盤價價差
+        # 直接拿這 6 天的最後一天 sub_prices[-1] (5/28的390) 減去 第一天 sub_prices[0] (5/21的266)！
+        # 390.00 - 266.00 = 124.00 元！完美精確對位！
         total_spread_6d = round(sub_prices[-1] - sub_prices[0], 2)
         
         window_df = pd.DataFrame({
-            "營業日": display_dates,
-            "收盤價 (元)": display_prices,
+            "營業日": sub_dates,
+            "收盤價 (元)": sub_prices,
             "當日漲跌幅": [f"{r:+.2f}%" if r != 0 else "0.00%" for r in daily_returns],
             "is_limit_up": is_limit_up_list,
             "is_limit_down": is_limit_down_list
         })
 
-        # 法規核心門檻：累積漲幅達25% 且 累積價差達50元
+        # 第一款注意股紅線：累積增幅 ≧ 25% 且 起訖價差 ≧ 50元
         if sum_ret_6d >= 25.0 and total_spread_6d >= 50.0:
             is_danger = True
 
@@ -237,7 +238,7 @@ if stock_id:
             else:
                 st.title(f"🟢 :green[綠燈：今日收盤數據未達注意股標準（安全）]")
                 
-            # 👑 【極重要修正】：今日 6 日收盤起迄價差絕對精確顯示為 124.00 元！
+            # 👑 【100% 零誤差展現】：今日起迄收盤價價差完美顯示為 124.00 元
             st.subheader(f"💰 今日6日收盤價起迄價差: {today_total_spread:+.2f} 元  |  📈 今日6日累積變動: {today_sum_ret:+.2f}%")
         
         with col_price_metric:
@@ -283,8 +284,8 @@ if stock_id:
             
             sum_past_4_days = sum(past_returns[:-1])
             
-            # 🔮 未來模擬的扣抵基準日：與當前目標完全相同，往前精確錨定第 -6 個索引（即 6 日前的基期日）
-            compare_base_price = sim_prices[-6] 
+            # 🔮 未來模擬的扣抵起點日：精確錨定為這滾動 6 天的第一天價格（即陣列倒數第 5 個索引）
+            compare_base_price = sim_prices[-5] 
             
             day_trigger_price, corr_spread, corr_sum_ret = find_trigger_details_for_day(current_price, sum_past_4_days, compare_base_price)
             
